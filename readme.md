@@ -1,6 +1,6 @@
 # Description
 This repository contains the head files of the Dual-Structure Particle-based (DSP) map
-and a ROS node example to use this map.
+and a ROS node example to use this map. For more information about the DSP. See [video](https://www.youtube.com/watch?v=seF_Oy4YbXo&t=5s) and [preprint](https://arxiv.org/abs/2202.06273).
 
 There are three __head files__ in the `include` folder.
 1. ``dsp_dynamic.h`` is the head file for the DSP map with a constant velocity model. (Recommended for Type II dynamic occupancy map.)
