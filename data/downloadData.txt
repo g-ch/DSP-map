@@ -1,0 +1,4 @@
+
+You can download the following bag file and put it in the data folder to test our map with launch file.
+
+https://drive.google.com/file/d/1go4ALTe8CqaBY2wjZJzkUCmdlBI7yAAU/view?usp=sharing

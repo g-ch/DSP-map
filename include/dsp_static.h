@@ -1,6 +1,22 @@
-//
-// Created by clarence on 2021/8/19.
-//
+/**************************************************************************
+
+Copyright <2022> <Gang Chen>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+Author: Gang Chen
+
+Date: 2021/8/19
+
+Description: This is the head file for the DSP map with static model. The current occupancy status of dynamic obstacles can represented very quickly without generating any trail noise. But you cannot have prediction result. Therefore, this is a Type one dynamic occupancy map.
+
+**************************************************************************/
+
 
 #include <ctime>
 #include <cmath>
@@ -16,24 +32,26 @@
 #include <thread>
 #include "munkres.h"
 
+using namespace std;
+
 /** Parameters for the map **/
 #define MAP_LENGTH_VOXEL_NUM 66
 #define MAP_WIDTH_VOXEL_NUM 66
-#define MAP_HEIGHT_VOXEL_NUM 41
+#define MAP_HEIGHT_VOXEL_NUM 40
 #define VOXEL_RESOLUTION 0.15
-#define ANGLE_RESOLUTION 1
-#define MAX_PARTICLE_NUM_VOXEL 25
-#define LIMIT_MOVEMENT_IN_XY_PLANE 1
-#define PYRAMID_NEIGHBOR_N 1
+#define ANGLE_RESOLUTION 3
+#define MAX_PARTICLE_NUM_VOXEL 10
 
-
-#define PREDICTION_TIMES 6
-static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f, 1.f, 1.5f, 2.f}; //unit: second
+/// Note: Prediction is meaningless when using a static model! But we still leave the interface so you can directly switch between dsp_dynamic and dsp_static by using a different head file.
+#define PREDICTION_TIMES 1
+static const float prediction_future_time[PREDICTION_TIMES] = {0.05f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
 const int half_fov_h = 45;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 
+string particle_save_folder = "/home/clarence";
 /** END **/
+
 
 static const int observation_pyramid_num_h = (int)half_fov_h * 2 / ANGLE_RESOLUTION;
 static const int observation_pyramid_num_v = (int)half_fov_v * 2 / ANGLE_RESOLUTION;
@@ -42,9 +60,10 @@ static const int observation_pyramid_num = observation_pyramid_num_h * observati
 static const int VOXEL_NUM = MAP_LENGTH_VOXEL_NUM*MAP_WIDTH_VOXEL_NUM*MAP_HEIGHT_VOXEL_NUM;
 static const int PYRAMID_NUM = 360*180/ANGLE_RESOLUTION/ANGLE_RESOLUTION;
 static const int SAFE_PARTICLE_NUM = VOXEL_NUM * MAX_PARTICLE_NUM_VOXEL + 1e5;
-static const int SAFE_PARTICLE_NUM_VOXEL = MAX_PARTICLE_NUM_VOXEL * 2;
+static const int SAFE_PARTICLE_NUM_VOXEL = MAX_PARTICLE_NUM_VOXEL * 5;
 static const int SAFE_PARTICLE_NUM_PYRAMID = SAFE_PARTICLE_NUM/PYRAMID_NUM * 2;
 
+//An estimated number. If the observation points are too dense (over 100 points in one pyramid), the overflowed points will be ignored. It is suggested to use a voxel filter to the original point cloud.
 static const int observation_max_points_num_one_pyramid = 100;
 
 #define GAUSSIAN_RANDOMS_NUM 10000000
@@ -76,20 +95,25 @@ struct ClusterFeature{
     float vy = -10000.f;
     float vz = -10000.f;
     float v = 0.f;
-    float intensity = 0.f;
 };
 
+
+// flag value 0: invalid, value 1: valid but not newborn, value 3: valid newborn 7: Recently predicted
 /// Container for voxels h particles
+//  1.flag 2.vx 3.vy 4.vz 5.px 6.py 7.pz
+//  8.weight 9.update time
 static float voxels_with_particle[VOXEL_NUM][SAFE_PARTICLE_NUM_VOXEL][9];
 
+// 1. objects number; 2-4. Avg vx, vy, vz; 5-. Future objects number
 static const int voxels_objects_number_dimension = 4 + PREDICTION_TIMES;
 static float voxels_objects_number[VOXEL_NUM][voxels_objects_number_dimension];
 
 /// Container for pyramids
+// 0.flag 1.particle voxel index  2.particle index inside voxel
 static int pyramids_in_fov[observation_pyramid_num][SAFE_PARTICLE_NUM_PYRAMID][3];
 
-static const int pyramid_neighbors_num = (2 * PYRAMID_NEIGHBOR_N + 1) * (2 * PYRAMID_NEIGHBOR_N + 1);
-static int observation_pyramid_neighbors[observation_pyramid_num][pyramid_neighbors_num+1]{};
+// 1.neighbors num 2-10:neighbor indexes
+static int observation_pyramid_neighbors[observation_pyramid_num][10]{};
 
 /// Variables for velocity estimation
 pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in_current_view_rotated(new pcl::PointCloud<pcl::PointXYZ>());
@@ -97,6 +121,7 @@ static float current_position[3] = {0.f, 0.f, 0.f};
 static float voxel_filtered_resolution = 0.15;
 static float delt_t_from_last_observation = 0.f;
 pcl::PointCloud<pcl::PointXYZINormal>::Ptr input_cloud_with_velocity(new pcl::PointCloud<pcl::PointXYZINormal>());
+
 
 /** Storage for Gaussian randoms and Gaussian PDF**/
 static float p_gaussian_randoms[GAUSSIAN_RANDOMS_NUM];
@@ -107,11 +132,11 @@ class DSPMap{
 public:
 
     DSPMap(int init_particle_num = 0, float init_weight=0.01f)
-            : voxel_num_x(MAP_LENGTH_VOXEL_NUM),
-              voxel_num_y(MAP_WIDTH_VOXEL_NUM),
-              voxel_num_z(MAP_HEIGHT_VOXEL_NUM),
+            : voxel_num_x(MAP_LENGTH_VOXEL_NUM),  /// Must be odd. voxel_resolution_set*voxel_num_x_set = map length
+              voxel_num_y(MAP_WIDTH_VOXEL_NUM),  /// Must be odd. voxel_resolution_set*voxel_num_y_set = map width
+              voxel_num_z(MAP_HEIGHT_VOXEL_NUM),  /// Must be odd. voxel_resolution_set*voxel_num_z_set = map height
               voxel_resolution(VOXEL_RESOLUTION),
-              angle_resolution(ANGLE_RESOLUTION),
+              angle_resolution(ANGLE_RESOLUTION),  /// degree, should be completely divided by 360 degrees.
               max_particle_num_voxel(MAX_PARTICLE_NUM_VOXEL),
               velocity_gaussian_random_seq(0),
               position_gaussian_random_seq(0),
@@ -142,6 +167,184 @@ public:
         cout << "\n See you ;)" <<endl;
     }
 
+    int update(int point_cloud_num, int size_of_one_point, float *point_cloud_ptr,
+                float sensor_px, float sensor_py, float sensor_pz, double time_stamp_second,
+                float sensor_quaternion_w, float sensor_quaternion_x,
+                float sensor_quaternion_y, float sensor_quaternion_z)  /// also requires point cloud and velocity
+    {
+        /** Get delt p **/
+        static float sensor_px_last = sensor_px;
+        static float sensor_py_last = sensor_py;
+        static float sensor_pz_last = sensor_pz;
+        static double time_stamp_second_last = time_stamp_second;
+
+        // Check if the odometry data is invalid
+        if(fabs(sensor_quaternion_w) > 1.001f || fabs(sensor_quaternion_x) > 1.001f || fabs(sensor_quaternion_y) > 1.001f || fabs(sensor_quaternion_z) > 1.001f){
+            cout << "Invalid quaternion." <<endl;
+            return 0;
+        }
+
+        float odom_delt_px = sensor_px - sensor_px_last;
+        float odom_delt_py = sensor_py - sensor_py_last;
+        float odom_delt_pz = sensor_pz - sensor_pz_last;
+        auto delt_t = (float)(time_stamp_second - time_stamp_second_last);
+
+        if(fabs(odom_delt_px) > 10.f || fabs(odom_delt_py) > 10.f || fabs(odom_delt_pz) > 10.f || delt_t < 0.f || delt_t > 10.f){
+            cout << "!!! delt_t = "<< delt_t <<endl;
+            cout << "!!! sensor_px_last = " << sensor_px_last << "sensor_px = " << sensor_px << " odom_delt_px="<<odom_delt_px<<endl;
+            cout << "!!! sensor_py_last = " << sensor_py_last << "sensor_py = " << sensor_py << " odom_delt_py="<<odom_delt_py<<endl;
+            return 0;
+        }
+
+        // clock_t start11, finish11;
+        // start11 = clock();
+
+        current_position[0] = sensor_px_last = sensor_px;
+        current_position[1] = sensor_py_last = sensor_py;
+        current_position[2] = sensor_pz_last = sensor_pz;
+        time_stamp_second_last = time_stamp_second;
+
+        delt_t_from_last_observation = delt_t;
+
+        /** Update pyramid boundary planes' normal vectors' parameters **/
+
+
+        sensor_rotation_quaternion[0] = sensor_quaternion_w;
+        sensor_rotation_quaternion[1] = sensor_quaternion_x;
+        sensor_rotation_quaternion[2] = sensor_quaternion_y;
+        sensor_rotation_quaternion[3] = sensor_quaternion_z;
+
+        for(int i=0; i<observation_pyramid_num_h+1; i++){
+            rotateVectorByQuaternion(&pyramid_BPnorm_params_ori_h[i][0], sensor_rotation_quaternion, &pyramid_BPnorm_params_h[i][0]);
+        }
+
+        for(int j=0; j<observation_pyramid_num_v+1; j++){
+            rotateVectorByQuaternion(&pyramid_BPnorm_params_ori_v[j][0], sensor_rotation_quaternion, &pyramid_BPnorm_params_v[j][0]);
+        }
+
+        /** Insert point cloud to observation storage **/
+        for(int i=0; i< observation_pyramid_num; i++){  //Initialize point num in the storage
+            observation_num_each_pyramid[i] = 0; //Set number of observations in each pyramid as zero in the beginning
+            point_cloud_max_length[i] = -1.f;
+        }
+
+        cloud_in_current_view_rotated->clear();  // Clear first
+
+        int iter_num = 0; // This is defined because one point has more than one float values. like px, py, pz
+        int valid_points = 0; //NOTE: the number of valid points might be different from input points number is the real FOV is larger than the defined FOV. However, if the point is outside of the map but is still in FOV, it will be counted.
+        for(int p_seq=0; p_seq<point_cloud_num; ++p_seq)
+        {
+            float rotated_point_this[3];
+            rotateVectorByQuaternion(&point_cloud_ptr[iter_num], sensor_rotation_quaternion, rotated_point_this);
+
+            // Store in pcl point cloud for velocity estimation of new born particles
+            pcl::PointXYZ p_this;
+            p_this.x = rotated_point_this[0];
+            p_this.y = rotated_point_this[1];
+            p_this.z = rotated_point_this[2];
+            cloud_in_current_view_rotated->push_back(p_this);
+
+            // Store in pyramids for update
+            if(ifInPyramidsArea(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]))
+            {
+                int pyramid_index_h, pyramid_index_v;
+                pyramid_index_h = findPointPyramidHorizontalIndex(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]);
+                pyramid_index_v = findPointPyramidVerticalIndex(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]);
+
+                int pyramid_index = pyramid_index_h * observation_pyramid_num_v + pyramid_index_v;
+                int  observation_inner_seq = observation_num_each_pyramid[pyramid_index];
+
+                float length = sqrtf( rotated_point_this[0]*rotated_point_this[0] + rotated_point_this[1]*rotated_point_this[1] + rotated_point_this[2]*rotated_point_this[2]);
+
+                // get point cloud position in global coordinate
+                point_cloud[pyramid_index][observation_inner_seq][0] = rotated_point_this[0];
+                point_cloud[pyramid_index][observation_inner_seq][1] = rotated_point_this[1];
+                point_cloud[pyramid_index][observation_inner_seq][2] = rotated_point_this[2];
+                point_cloud[pyramid_index][observation_inner_seq][3] = 0.f;
+                point_cloud[pyramid_index][observation_inner_seq][4] = length;
+
+                if(point_cloud_max_length[pyramid_index] < length){  // to be used to judge if a particle is occluded
+                    point_cloud_max_length[pyramid_index] = length;
+                }
+
+                observation_num_each_pyramid[pyramid_index] += 1;
+
+                // Omit the overflowed observation points. It is suggested to used a voxel filter on the input point clouds to avoid overflow.
+                if(observation_num_each_pyramid[pyramid_index] >= observation_max_points_num_one_pyramid){
+                    observation_num_each_pyramid[pyramid_index] = observation_max_points_num_one_pyramid - 1;
+                }
+
+                ++ valid_points;
+            }
+
+            iter_num += size_of_one_point;
+        }
+
+        expected_new_born_objects = new_born_particle_weight * (float)valid_points * (float)new_born_particle_number_each_point;
+        new_born_each_object_weight = new_born_particle_weight * (float)new_born_particle_number_each_point;
+
+
+        /// Start a new thread for velocity estimation
+        std::thread velocity_estimation(velocityEstimationThread);
+
+        /*** Prediction ***/
+        mapPrediction(-odom_delt_px, -odom_delt_py, -odom_delt_pz, delt_t);  // Particles move in the opposite of the robot moving direction
+
+        /*** Update ***/
+        if(point_cloud_num >= 0){
+            mapUpdate();
+        }else{
+            cout << "No points to update." <<endl;
+        }
+
+
+        /** Wait until optical flow calculation is finished **/
+        velocity_estimation.join();
+
+        /** Add updated new born particles ***/
+
+
+        if(point_cloud_num >= 0){
+            mapAddNewBornParticlesByObservation();
+        }
+
+
+        /** Calculate object number and Resample **/
+
+        /// NOTE in this step the flag which is set to be 7.f in prediction step will be changed to 1.f or 0.6f.
+        /// Removing this step will make prediction malfunction unless the flag is reset somewhere else.
+        mapOccupancyCalculationAndResample();
+
+
+        /*** Record particles for analysis  ***/
+        static int recorded_once_flag = 0;
+
+        if(if_record_particle_csv){
+            if(if_record_particle_csv < 0 || (update_time > record_time && !recorded_once_flag)){
+                recorded_once_flag = 1;
+
+                ofstream particle_log_writer;
+                string file_name = particle_save_folder + "particles_update_t_" + to_string(update_counter) + "_"+ to_string((int)(update_time*1000)) + ".csv";
+                particle_log_writer.open(file_name, ios::out | ios::trunc);
+
+                for(int i=0; i<voxels_total_num; i++){
+                    for(int j=0; j<SAFE_PARTICLE_NUM_VOXEL; j++){
+                        if(voxels_with_particle[i][j][0] > 0.1f){
+                            for(int k=0; k<8; k++){
+                                //  1.flag 2.vx 3.vy 4.vz 5.px 6.py 7.pz
+                                //  8.weight 9.update time
+                                particle_log_writer << voxels_with_particle[i][j][k] <<",";
+                            }
+                            particle_log_writer << i <<"\n";
+                        }
+                    }
+                }
+                particle_log_writer.close();
+            }
+        }
+
+        return 1;
+    }
 
     void setPredictionVariance(float p_stddev, float v_stddev){
         position_prediction_stddev = p_stddev;
@@ -248,13 +451,6 @@ public:
             {
                 voxels_objects_number[i][j] = 0.f;
             }
-        }
-    }
-
-    /// Get clustered result for visualization
-    void getKMClusterResult(pcl::PointCloud<pcl::PointXYZINormal> &cluster_cloud){
-        for(auto &point : *input_cloud_with_velocity){
-            cluster_cloud.push_back(point);
         }
     }
 
@@ -464,14 +660,10 @@ private:
                     if(fabs(voxels_with_particle[v_index][p][1]*voxels_with_particle[v_index][p][2]*voxels_with_particle[v_index][p][3]) < 1e-6){
                         // keep small, for static obstacles
                     }else{
-                        voxels_with_particle[v_index][p][1] += getVelocityGaussianZeroCenter();  //vx
-                        voxels_with_particle[v_index][p][2] += getVelocityGaussianZeroCenter();  //vy
-                        voxels_with_particle[v_index][p][3] += getVelocityGaussianZeroCenter();  //vz
+                        voxels_with_particle[v_index][p][1] = 0.f;  //vx
+                        voxels_with_particle[v_index][p][2] = 0.f;  //vy
+                        voxels_with_particle[v_index][p][3] = 0.f;  //vz
                     }
-
-#if(LIMIT_MOVEMENT_IN_XY_PLANE)
-                    voxels_with_particle[v_index][p][3] = 0.f;
-#endif
 
                     voxels_with_particle[v_index][p][4] += delt_t*voxels_with_particle[v_index][p][1] + odom_delt_px;  //px
                     voxels_with_particle[v_index][p][5] += delt_t*voxels_with_particle[v_index][p][2] + odom_delt_py;  //py
@@ -504,6 +696,12 @@ private:
             }
         }
 
+//        cout << "exist_particles=" << exist_particles<<endl;
+//        cout << "voxel_full_remove_counter="<<voxel_full_remove_counter<<endl;
+//        cout << "pyramid_full_remove_counter="<<pyramid_full_remove_counter<<endl;
+//        cout << "moves_out_counter="<<moves_out_counter<<endl;
+//        cout << "operation_counter_prediction="<<operation_counter<<endl;
+
         if(moves_out_counter > 10000){
             cout <<"!!!!! An error occured! delt_t = " << delt_t <<endl;
             cout << "odom_delt_px = " << odom_delt_px <<" odom_delt_py = " << odom_delt_py << "odom_delt_pz=" << odom_delt_pz<< endl;
@@ -512,6 +710,96 @@ private:
     }
 
 
+    void mapUpdate()
+    {
+        int operation_counter_update = 0;
+
+        /// Calculate Ck + kappa first
+        for(int i=0; i<observation_pyramid_num; ++i){
+            for(int j=0; j<observation_num_each_pyramid[i]; ++j){
+                // Iteration of z
+                for(int n_seq=0; n_seq<observation_pyramid_neighbors[i][0]; ++n_seq){
+                    int pyramid_check_index = observation_pyramid_neighbors[i][n_seq+1]; //0.neighbors num 1-9:neighbor indexes
+
+                    for(int particle_seq=0; particle_seq<SAFE_PARTICLE_NUM_PYRAMID; ++particle_seq){
+                        if(pyramids_in_fov[pyramid_check_index][particle_seq][0] & O_MAKE_VALID){  //Check only valid particles
+                            int particle_voxel_index = pyramids_in_fov[pyramid_check_index][particle_seq][1];
+                            int particle_voxel_inner_index = pyramids_in_fov[pyramid_check_index][particle_seq][2];
+
+//                            cout<<"pyramid_check_index="<<pyramid_check_index<<", particle_v_inner_index="<<particle_v_inner_index<<", point_cloud[i][j][0]="<<point_cloud[i][j][0]<<endl;
+
+                            float gk = queryNormalPDF(
+                                    voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][4],
+                                    point_cloud[i][j][0], sigma_ob)
+                                       * queryNormalPDF(
+                                    voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][5],
+                                    point_cloud[i][j][1], sigma_ob)
+                                       * queryNormalPDF(
+                                    voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][6],
+                                    point_cloud[i][j][2], sigma_ob);
+
+                            point_cloud[i][j][3] += P_detection * voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][7] * gk;
+                        }
+                    }
+                }
+                /// add weight for new born particles
+                point_cloud[i][j][3] += (expected_new_born_objects + kappa);
+            }
+        }
+
+
+        /// Update weight for each particle in view
+        for(int i=0; i < observation_pyramid_num; i++)
+        {
+            int current_pyramid_index = i;
+
+            for(int inner_seq=0; inner_seq<SAFE_PARTICLE_NUM_PYRAMID; inner_seq++){
+                // Iteration of particles
+                if(pyramids_in_fov[current_pyramid_index][inner_seq][0] & O_MAKE_VALID){ //update only valid particle
+
+                    int neighbor_num = observation_pyramid_neighbors[current_pyramid_index][0];
+
+                    int particle_voxel_index = pyramids_in_fov[current_pyramid_index][inner_seq][1];
+                    int particle_voxel_inner_index = pyramids_in_fov[current_pyramid_index][inner_seq][2];
+
+                    float px_this = voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][4];
+                    float py_this = voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][5];
+                    float pz_this = voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][6];
+                    float particle_dist_length = sqrtf(px_this*px_this + py_this*py_this + pz_this*pz_this);
+
+                    if(point_cloud_max_length[i] > 0.f && particle_dist_length > point_cloud_max_length[i] + voxel_resolution) //Update only particles that are not occluded, use voxel_resolution as the distance metric.
+                    {
+                        // occluded
+                        continue;
+                    }
+
+
+                    float sum_by_zk = 0.f;
+                    for(int neighbor_seq=0; neighbor_seq<neighbor_num; ++neighbor_seq)
+                    {
+                        int neighbor_index = observation_pyramid_neighbors[current_pyramid_index][neighbor_seq+1];
+
+                        for(int z_seq=0; z_seq<observation_num_each_pyramid[neighbor_index]; ++z_seq) //for all observation points in a neighbor pyramid
+                        {
+                            float gk = queryNormalPDF(px_this, point_cloud[neighbor_index][z_seq][0], sigma_ob)
+                                       * queryNormalPDF(py_this, point_cloud[neighbor_index][z_seq][1], sigma_ob)
+                                       * queryNormalPDF(pz_this, point_cloud[neighbor_index][z_seq][2], sigma_ob);
+
+                            sum_by_zk += P_detection * gk / point_cloud[neighbor_index][z_seq][3];
+                            ++operation_counter_update;
+                        }
+
+
+                    }
+
+                    voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][7] *= ((1 - P_detection) + sum_by_zk);
+                    voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][8] = update_time;
+                }
+            }
+        }
+//        cout << "operation_counter_update=" << operation_counter_update <<endl;
+
+    }
 
 public:
     void mapAddNewBornParticlesByObservation()
@@ -526,13 +814,12 @@ public:
         float updated_weight_new_born = new_born_particle_weight * normalization_coefficient;
 
         /** Add new born particles **/
-        static int min_static_new_born_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.15f);
+        static int min_static_new_born_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.2f);
         static int static_new_born_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.4f);  // static points takes 3 in 10
         static int pf_derive_new_born_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.5f); // Derived takes half
         static const int model_generated_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.8f);
 
         int successfully_born_particles = 0;
-        /// TODO: Improve efficiency in this new born procedure
         for(auto & point : *input_cloud_with_velocity)
         {
             pcl::PointXYZ p_corrected;
@@ -545,6 +832,7 @@ public:
             float dynamic_particle_weight_sum = 0.f;
             float static_or_dynamic_weight_sum = 0.f;
 
+            /// TODO: Improve efficiency in this weight summation calculation procedure
             if(getParticleVoxelsIndex(p_corrected.x, p_corrected.y, p_corrected.z, point_voxel_index)){
                 //This condition should always be true because the point cloud outside of the map should be omitted in the first place. Just an insurance.
                 for(int kk=0; kk<SAFE_PARTICLE_NUM_VOXEL; ++kk){
@@ -568,24 +856,6 @@ public:
                 continue;
             }
 
-            // Dempster-Shafer Theory
-            float total_weight_voxel = static_particle_weight_sum + dynamic_particle_weight_sum + static_or_dynamic_weight_sum;
-            float m_static = static_particle_weight_sum / total_weight_voxel;
-            float m_dynamic = dynamic_particle_weight_sum / total_weight_voxel;
-            float m_static_or_dynamic = static_or_dynamic_weight_sum / total_weight_voxel;
-
-            float p_static = (m_static + m_static + m_static_or_dynamic) * 0.5f;
-            float p_dynamic = (m_dynamic + m_dynamic + m_static_or_dynamic) * 0.5f;
-            float normalization_p = p_static + p_dynamic;
-            float p_static_normalized = p_static / normalization_p;
-            float p_dynamic_normalized = p_dynamic / normalization_p;
-
-            static_new_born_particle_number_each_point = (int)((float)model_generated_particle_number_each_point * p_static_normalized);
-            pf_derive_new_born_particle_number_each_point = model_generated_particle_number_each_point - static_new_born_particle_number_each_point;
-
-            // Set a minimum number of static particles
-            static_new_born_particle_number_each_point = max(min_static_new_born_particle_number_each_point, static_new_born_particle_number_each_point);
-
             for(int p=0; p<new_born_particle_number_each_point; p++){
                 std::shared_ptr<Particle> particle_ptr{new Particle};
 
@@ -595,37 +865,9 @@ public:
 
                 if (getParticleVoxelsIndex(*particle_ptr, particle_ptr->voxel_index)) {
                     // Particle index might be different from the point index because a random Gaussian is added.
-                    if(p < static_new_born_particle_number_each_point){  // add static points
-                        particle_ptr->vx = 0.f;
-                        particle_ptr->vy = 0.f;
-                        particle_ptr->vz = 0.f;
-                    }else if(point.normal_x > -100.f && p < model_generated_particle_number_each_point){ //p < pf_derive_new_born_particle_number_each_point + static_new_born_particle_number_each_point){
-                        /// Use estimated velocity to generate new particles
-                        if(point.intensity > 0.01f){
-                            particle_ptr->vx = point.normal_x + 4*getVelocityGaussianZeroCenter();
-                            particle_ptr->vy = point.normal_y + 4*getVelocityGaussianZeroCenter();
-                            particle_ptr->vz = point.normal_z + 4*getVelocityGaussianZeroCenter();
-                        }else{ //static points like ground
-                            particle_ptr->vx = 0.f;
-                            particle_ptr->vy = 0.f;
-                            particle_ptr->vz = 0.f;
-                        }
-                    }
-                    else{ /// Considering Random Noise
-                        if(point.intensity > 0.01f){
-                            particle_ptr->vx = generateRandomFloat(-1.5f, 1.5f);
-                            particle_ptr->vy = generateRandomFloat(-1.5f, 1.5f);
-                            particle_ptr->vz = generateRandomFloat(-0.5f, 0.5f);
-                        }else{ //static points like ground
-                            particle_ptr->vx = 0.f;
-                            particle_ptr->vy = 0.f;
-                            particle_ptr->vz = 0.f;
-                        }
-                    }
-
-#if(LIMIT_MOVEMENT_IN_XY_PLANE)
+                    particle_ptr->vx = 0.f;
+                    particle_ptr->vy = 0.f;
                     particle_ptr->vz = 0.f;
-#endif
 
                     particle_ptr->weight = updated_weight_new_born;
 
@@ -637,6 +879,8 @@ public:
             }
         }
 
+
+//        cout << "successfully_born_particles = "<<successfully_born_particles<<endl;
     }
 
 private:
@@ -851,8 +1095,8 @@ private: /*** Some specific functions ***/
 
         neighbor_spaces_num = 0;
 
-        for(int i=-PYRAMID_NEIGHBOR_N ; i <= PYRAMID_NEIGHBOR_N; ++i){
-            for(int j=-PYRAMID_NEIGHBOR_N; j <= PYRAMID_NEIGHBOR_N; ++j){
+        for(int i=-1; i<=1; ++i){
+            for(int j=-1; j<=1; ++j){
                 int h = h_index_ori + i;
                 int v = v_index_ori + j;
                 if(h>=0 && h<observation_pyramid_num_h && v>=0 && v<observation_pyramid_num_v)
@@ -1090,6 +1334,77 @@ private: /*** Some specific functions ***/
                                 (c1.center_y - c2.center_y)*(c1.center_y - c2.center_y) +
                                 (c1.center_z - c2.center_z)*(c1.center_z - c2.center_z);
         return sqrtf(square_distance);
+    }
+
+
+    static void velocityEstimationThread()
+    {
+        /// Static model. Zero velocity
+        if( cloud_in_current_view_rotated->points.empty()) return;
+
+        input_cloud_with_velocity->clear();
+
+        /// Remove ground and transform data
+        pcl::PointCloud<pcl::PointXYZ>::Ptr ground_points(new pcl::PointCloud<pcl::PointXYZ>());
+        pcl::PointCloud<pcl::PointXYZ>::Ptr non_ground_points(new pcl::PointCloud<pcl::PointXYZ>());
+
+        for(auto &p : cloud_in_current_view_rotated->points){
+            pcl::PointXYZ transformed_p;
+            transformed_p.x = p.x + current_position[0];
+            transformed_p.y = p.y + current_position[1];
+            transformed_p.z = p.z + current_position[2];
+
+            pcl::PointXYZINormal p2;
+            p2.x = transformed_p.x;
+            p2.y = transformed_p.y;
+            p2.z = transformed_p.z;
+            p2.normal_x = 0.f;
+            p2.normal_y = 0.f;
+            p2.normal_z = 0.f;
+            p2.intensity = 0.f;
+            input_cloud_with_velocity->push_back(p2);
+        }
+
+    }
+
+
+
+
+    /*** For test ***/
+public:
+    static float generateRandomFloat(float min, float max){
+        return min + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(max-min)));
+    }
+
+
+    void getVoxelPositionFromIndexPublic(const int &index, float &px, float &py, float &pz) const{
+        static const int z_change_storage_taken = voxel_num_y*voxel_num_x;
+        static const int y_change_storage_taken = voxel_num_x;
+
+        int z_index = index / z_change_storage_taken;
+        int yx_left_indexes = index - z_index * z_change_storage_taken;
+        int y_index = yx_left_indexes / y_change_storage_taken;
+        int x_index = yx_left_indexes - y_index * y_change_storage_taken;
+
+        static const float correction_x = -map_length_x_half + voxel_resolution*0.5f;
+        static const float correction_y = -map_length_y_half + voxel_resolution*0.5f;
+        static const float correction_z = -map_length_z_half + voxel_resolution*0.5f;
+
+        px = (float)x_index * voxel_resolution + correction_x;
+        py = (float)y_index * voxel_resolution + correction_y;
+        pz = (float)z_index * voxel_resolution + correction_z;
+    }
+
+    int getPointVoxelsIndexPublic(const float &px, const float &py, const float &pz, int & index){
+        if(ifParticleIsOut(px, py, pz)) {return 0;}
+        auto x = (int)((px + map_length_x_half) / voxel_resolution);
+        auto y = (int)((py + map_length_y_half) / voxel_resolution);
+        auto z = (int)((pz + map_length_z_half) / voxel_resolution);
+        index = z*voxel_num_y*voxel_num_x + y*voxel_num_x + x;
+        if(index<0 || index>=VOXEL_NUM){
+            return 0;
+        }
+        return 1;
     }
 
 };
