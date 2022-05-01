@@ -16,7 +16,7 @@ A ROS __node example__ `map_sim_example.cpp` can be found in the `src` folder. I
 __Tested environment__: Ubuntu 18.04 + ROS Melodic and Ubuntu 20.04 + ROS Noetic
 
 To compile the source code of our map, you need:
-1. PCL and Mavros. PCL is included in desktop-full version of ROS.
+1. PCL and Mavros. PCL is included in the desktop-full version of ROS.
    Mavros is only used for ROS message subscriptions in the example node. Check [mavros](https://github.com/mavlink/mavros) for installation guidance.
 
 2. Install [munkers-cpp](https://github.com/saebyn/munkres-cpp) with the following steps.
