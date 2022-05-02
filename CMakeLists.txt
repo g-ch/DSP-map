@@ -5,14 +5,12 @@ add_definitions(-std=c++14 -g -O3 -ftree-vectorize -ffast-math -march=native -lp
 #add_definitions(-std=c++14)
 
 find_package(PCL REQUIRED)
-find_package(OpenCV 4 REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
   message_filters
-  cv_bridge #
   sensor_msgs #
   image_transport
 )
@@ -28,7 +26,6 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
-  ${OpenCV_INCLUDE_DIRS}
 )
 
 include_directories(/usr/local/include/munkres)
