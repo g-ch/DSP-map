@@ -1,22 +1,6 @@
-/**************************************************************************
-
-Copyright <2022> <Gang Chen>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-
-Author: Gang Chen
-
-Date: 2021/8/19
-
-Description: This is the head file for the DSP map with static model. The current occupancy status of dynamic obstacles can represented very quickly without generating any trail noise. But you cannot have prediction result. Therefore, this is a Type one dynamic occupancy map.
-
-**************************************************************************/
-
+//
+// Created by clarence on 2021/8/19.
+//
 
 #include <ctime>
 #include <cmath>
@@ -31,42 +15,24 @@ Description: This is the head file for the DSP map with static model. The curren
 #include <pcl/segmentation/extract_clusters.h>
 #include <thread>
 #include "munkres.h"
-
-using namespace std;
-
-/** Parameters for the map **/
-#define MAP_LENGTH_VOXEL_NUM 66
-#define MAP_WIDTH_VOXEL_NUM 66
-#define MAP_HEIGHT_VOXEL_NUM 40
-#define VOXEL_RESOLUTION 0.15
-#define ANGLE_RESOLUTION 3
-#define MAX_PARTICLE_NUM_VOXEL 10
-
-/// Note: Prediction is meaningless when using a static model! But we still leave the interface so you can directly switch between dsp_dynamic and dsp_static by using a different head file.
-#define PREDICTION_TIMES 1
-static const float prediction_future_time[PREDICTION_TIMES] = {0.05f}; //unit: second. The first value is used to compensate the delay caused by the map.
-
-const int half_fov_h = 45;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
-const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
-
-string particle_save_folder = "/home/clarence";
-/** END **/
+#include "map_parameters.h"
 
 
 static const int observation_pyramid_num_h = (int)half_fov_h * 2 / ANGLE_RESOLUTION;
 static const int observation_pyramid_num_v = (int)half_fov_v * 2 / ANGLE_RESOLUTION;
 static const int observation_pyramid_num = observation_pyramid_num_h * observation_pyramid_num_v;
 
-static const int VOXEL_NUM = MAP_LENGTH_VOXEL_NUM*MAP_WIDTH_VOXEL_NUM*MAP_HEIGHT_VOXEL_NUM;
-static const int PYRAMID_NUM = 360*180/ANGLE_RESOLUTION/ANGLE_RESOLUTION;
 static const int SAFE_PARTICLE_NUM = VOXEL_NUM * MAX_PARTICLE_NUM_VOXEL + 1e5;
-static const int SAFE_PARTICLE_NUM_VOXEL = MAX_PARTICLE_NUM_VOXEL * 5;
+static const int SAFE_PARTICLE_NUM_VOXEL = MAX_PARTICLE_NUM_VOXEL * 2;
 static const int SAFE_PARTICLE_NUM_PYRAMID = SAFE_PARTICLE_NUM/PYRAMID_NUM * 2;
 
 //An estimated number. If the observation points are too dense (over 100 points in one pyramid), the overflowed points will be ignored. It is suggested to use a voxel filter to the original point cloud.
 static const int observation_max_points_num_one_pyramid = 100;
+static const float obstacle_thickness_for_occlusion = 0.3;
 
-#define GAUSSIAN_RANDOMS_NUM 10000000
+//int velocity_estimation_error_occurred = 0;
+
+#define GAUSSIAN_RANDOMS_NUM 1000000
 
 #define O_MAKE_VALID 1       // use |= operator
 #define O_MAKE_INVALID  0    // use &= operator
@@ -95,6 +61,7 @@ struct ClusterFeature{
     float vy = -10000.f;
     float vz = -10000.f;
     float v = 0.f;
+    float intensity = 0.f;
 };
 
 
@@ -126,6 +93,8 @@ pcl::PointCloud<pcl::PointXYZINormal>::Ptr input_cloud_with_velocity(new pcl::Po
 /** Storage for Gaussian randoms and Gaussian PDF**/
 static float p_gaussian_randoms[GAUSSIAN_RANDOMS_NUM];
 static float v_gaussian_randoms[GAUSSIAN_RANDOMS_NUM];
+static float localization_gaussian_randoms[GAUSSIAN_RANDOMS_NUM];
+
 static float standard_gaussian_pdf[20000];
 
 class DSPMap{
@@ -140,9 +109,11 @@ public:
               max_particle_num_voxel(MAX_PARTICLE_NUM_VOXEL),
               velocity_gaussian_random_seq(0),
               position_gaussian_random_seq(0),
+              localization_gaussian_random_seq(0),
               position_prediction_stddev(0.2f),
               velocity_prediction_stddev(0.1f),
-              sigma_ob(0.2f),
+              sigma_observation(0.2f),
+              sigma_localization(0.f),
               kappa(0.01f),
               P_detection(0.95f),
               update_time(0.f),
@@ -288,33 +259,68 @@ public:
         std::thread velocity_estimation(velocityEstimationThread);
 
         /*** Prediction ***/
+//        clock_t start7, finish7;
+//        start7 = clock();
+
         mapPrediction(-odom_delt_px, -odom_delt_py, -odom_delt_pz, delt_t);  // Particles move in the opposite of the robot moving direction
+//
+//        finish7 = clock();
+//        double duration7= (double)(finish7 - start7) / CLOCKS_PER_SEC;
+//        printf( "****** Prediction time %f seconds\n", duration7 );
 
         /*** Update ***/
+//        clock_t start8, finish8;
+//        start8 = clock();
         if(point_cloud_num >= 0){
             mapUpdate();
         }else{
             cout << "No points to update." <<endl;
         }
 
+//        finish8 = clock();
+//        double duration8= (double)(finish8 - start8) / CLOCKS_PER_SEC;
+//        printf( "****** Update time %f seconds\n", duration8 );
+
 
         /** Wait until optical flow calculation is finished **/
         velocity_estimation.join();
 
         /** Add updated new born particles ***/
-
+//        clock_t start1, finish1;
+//        start1 = clock();
 
         if(point_cloud_num >= 0){
             mapAddNewBornParticlesByObservation();
         }
 
+//        finish1 = clock();
+//        double duration1 = (double)(finish1 - start1) / CLOCKS_PER_SEC;
+//        printf( "****** new born time %f seconds\n", duration1);
 
         /** Calculate object number and Resample **/
-
+//        clock_t start9, finish9;
+//        start9 = clock();
         /// NOTE in this step the flag which is set to be 7.f in prediction step will be changed to 1.f or 0.6f.
         /// Removing this step will make prediction malfunction unless the flag is reset somewhere else.
         mapOccupancyCalculationAndResample();
 
+//        finish9 = clock();
+//        double duration9 = (double)(finish9 - start9) / CLOCKS_PER_SEC;
+//        printf( "****** Resample time %f seconds\n", duration9);
+
+
+        // finish11 = clock();
+        // double duration11= (double)(finish11 - start11) / CLOCKS_PER_SEC;
+        // printf( "****** Update time %f seconds\n", duration11 );
+
+        // total_time += duration11;
+        // ++ update_times;
+        // printf( "****** Average update time = %lf seconds\n", total_time / double(update_times));
+
+
+
+//        printf( "****** Total time %f seconds\n", duration1 + duration7 + duration8 + duration9 + duration11);
+//        printf("############################## \n \n");
 
         /*** Record particles for analysis  ***/
         static int recorded_once_flag = 0;
@@ -324,7 +330,7 @@ public:
                 recorded_once_flag = 1;
 
                 ofstream particle_log_writer;
-                string file_name = particle_save_folder + "particles_update_t_" + to_string(update_counter) + "_"+ to_string((int)(update_time*1000)) + ".csv";
+                string file_name = "/home/clarence/particles_update_t_" + to_string(update_counter) + "_"+ to_string((int)(update_time*1000)) + ".csv";
                 particle_log_writer.open(file_name, ios::out | ios::trunc);
 
                 for(int i=0; i<voxels_total_num; i++){
@@ -354,7 +360,22 @@ public:
     }
 
     void setObservationStdDev(float ob_stddev){
-        sigma_ob = ob_stddev;
+        sigma_observation = ob_stddev;
+        sigma_update = sigma_observation;
+
+        cout << "Observation stddev changed to " << sigma_observation << endl;
+    }
+
+    void setLocalizationStdDev(float lo_stddev){
+
+#if(CONSIDER_LOCALIZATION_UNCERTAINTY)
+        float tuned_scale_factor = 0.1f;
+        sigma_localization = lo_stddev*tuned_scale_factor;
+        cout << "Localization stddev changed to " << sigma_localization << endl;
+        // regenerate randoms
+        generateGaussianRandomsVectorZeroCenter();
+#endif
+
     }
 
     void setNewBornParticleWeight(float weight){
@@ -443,6 +464,34 @@ public:
     }
 
 
+    void getOccupancyMapWithRiskMaps(int &obstacles_num, pcl::PointCloud<pcl::PointXYZ> &cloud, float *risk_maps, const float threshold=0.7){
+        obstacles_num = 0;
+        for(int i=0; i<voxels_total_num; i++){
+            if(voxels_objects_number[i][0] > threshold){
+                pcl::PointXYZ pcl_point;
+                getVoxelPositionFromIndex(i, pcl_point.x, pcl_point.y, pcl_point.z);
+                cloud.push_back(pcl_point);
+
+                ++ obstacles_num;
+            }
+
+            for(int n=0; n < RISK_MAP_NUMBER; ++n){ // Set future weights
+                float temp_risk = 0.f;
+                for(int m=0; m < RISK_MAP_PREDICTION_TIMES; ++m){
+                    temp_risk += voxels_objects_number[i][4 + n*RISK_MAP_PREDICTION_TIMES +m];
+                }
+                *(risk_maps + i * RISK_MAP_NUMBER + n) = temp_risk;
+            }
+
+            /// Clear weights for next prediction
+            for(int j=4; j<voxels_objects_number_dimension; ++j)
+            {
+                voxels_objects_number[i][j] = 0.f;
+            }
+        }
+    }
+
+
     ///NOTE: If you don't want to use any visualization functions like "getOccupancyMap"
     ///      or "getOccupancyMapWithVelocity", you must call this function after update process.
     void clearOccupancyMapPrediction(){
@@ -451,6 +500,13 @@ public:
             {
                 voxels_objects_number[i][j] = 0.f;
             }
+        }
+    }
+
+    /// Get clustered result for visualization
+    void getKMClusterResult(pcl::PointCloud<pcl::PointXYZINormal> &cluster_cloud){
+        for(auto &point : *input_cloud_with_velocity){
+            cluster_cloud.push_back(point);
         }
     }
 
@@ -482,7 +538,9 @@ private:
     float position_prediction_stddev;
     float velocity_prediction_stddev;
 
-    float sigma_ob;
+    float sigma_observation;
+    float sigma_localization;
+    float sigma_update;
 
     float P_detection;
 
@@ -491,6 +549,7 @@ private:
 
     /** Variables **/
     int position_gaussian_random_seq;
+    int localization_gaussian_random_seq;
     int velocity_gaussian_random_seq;
 
     float kappa;
@@ -535,6 +594,8 @@ private:
     void setInitParameters(){
 
         /*** Set parameters **/
+        sigma_update = sigma_observation;
+
         map_length_x_half = (voxel_resolution* (float)voxel_num_x) * 0.5f;
         map_length_y_half = (voxel_resolution* (float)voxel_num_y) * 0.5f;
         map_length_z_half = (voxel_resolution* (float)voxel_num_z) * 0.5f;
@@ -628,6 +689,9 @@ private:
                 }
             }
         }
+
+//        cout << "successfully_added_num="<<successfully_added_num<<endl;
+//        cout << "voxel_overflow_num="<<voxel_overflow_num<<endl;
     }
 
 
@@ -660,14 +724,27 @@ private:
                     if(fabs(voxels_with_particle[v_index][p][1]*voxels_with_particle[v_index][p][2]*voxels_with_particle[v_index][p][3]) < 1e-6){
                         // keep small, for static obstacles
                     }else{
-                        voxels_with_particle[v_index][p][1] = 0.f;  //vx
-                        voxels_with_particle[v_index][p][2] = 0.f;  //vy
-                        voxels_with_particle[v_index][p][3] = 0.f;  //vz
+                        voxels_with_particle[v_index][p][1] += getVelocityGaussianZeroCenter();  //vx
+                        voxels_with_particle[v_index][p][2] += getVelocityGaussianZeroCenter();  //vy
+                        voxels_with_particle[v_index][p][3] += getVelocityGaussianZeroCenter();  //vz
                     }
 
+#if(LIMIT_MOVEMENT_IN_XY_PLANE)
+                    voxels_with_particle[v_index][p][3] = 0.f;
+#endif
+
+
+
+#if(CONSIDER_LOCALIZATION_UNCERTAINTY)
+                    voxels_with_particle[v_index][p][4] += delt_t*voxels_with_particle[v_index][p][1] + odom_delt_px + getLocalizationGaussianZeroCenter();
+                    voxels_with_particle[v_index][p][5] += delt_t*voxels_with_particle[v_index][p][2] + odom_delt_py + getLocalizationGaussianZeroCenter();
+                    voxels_with_particle[v_index][p][6] += delt_t*voxels_with_particle[v_index][p][3] + odom_delt_pz + getLocalizationGaussianZeroCenter();
+#else
                     voxels_with_particle[v_index][p][4] += delt_t*voxels_with_particle[v_index][p][1] + odom_delt_px;  //px
                     voxels_with_particle[v_index][p][5] += delt_t*voxels_with_particle[v_index][p][2] + odom_delt_py;  //py
                     voxels_with_particle[v_index][p][6] += delt_t*voxels_with_particle[v_index][p][3] + odom_delt_pz;  //pz
+#endif
+
 
                     int particle_voxel_index_new;
                     if(getParticleVoxelsIndex(voxels_with_particle[v_index][p][4], voxels_with_particle[v_index][p][5],
@@ -730,13 +807,13 @@ private:
 
                             float gk = queryNormalPDF(
                                     voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][4],
-                                    point_cloud[i][j][0], sigma_ob)
+                                    point_cloud[i][j][0], sigma_update)
                                        * queryNormalPDF(
                                     voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][5],
-                                    point_cloud[i][j][1], sigma_ob)
+                                    point_cloud[i][j][1], sigma_update)
                                        * queryNormalPDF(
                                     voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][6],
-                                    point_cloud[i][j][2], sigma_ob);
+                                    point_cloud[i][j][2], sigma_update);
 
                             point_cloud[i][j][3] += P_detection * voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][7] * gk;
                         }
@@ -767,7 +844,7 @@ private:
                     float pz_this = voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][6];
                     float particle_dist_length = sqrtf(px_this*px_this + py_this*py_this + pz_this*pz_this);
 
-                    if(point_cloud_max_length[i] > 0.f && particle_dist_length > point_cloud_max_length[i] + voxel_resolution) //Update only particles that are not occluded, use voxel_resolution as the distance metric.
+                    if(point_cloud_max_length[i] > 0.f && particle_dist_length > point_cloud_max_length[i] + obstacle_thickness_for_occlusion) //Update only particles that are not occluded, use voxel_resolution as the distance metric.
                     {
                         // occluded
                         continue;
@@ -781,9 +858,9 @@ private:
 
                         for(int z_seq=0; z_seq<observation_num_each_pyramid[neighbor_index]; ++z_seq) //for all observation points in a neighbor pyramid
                         {
-                            float gk = queryNormalPDF(px_this, point_cloud[neighbor_index][z_seq][0], sigma_ob)
-                                       * queryNormalPDF(py_this, point_cloud[neighbor_index][z_seq][1], sigma_ob)
-                                       * queryNormalPDF(pz_this, point_cloud[neighbor_index][z_seq][2], sigma_ob);
+                            float gk = queryNormalPDF(px_this, point_cloud[neighbor_index][z_seq][0], sigma_update)
+                                       * queryNormalPDF(py_this, point_cloud[neighbor_index][z_seq][1], sigma_update)
+                                       * queryNormalPDF(pz_this, point_cloud[neighbor_index][z_seq][2], sigma_update);
 
                             sum_by_zk += P_detection * gk / point_cloud[neighbor_index][z_seq][3];
                             ++operation_counter_update;
@@ -814,12 +891,13 @@ public:
         float updated_weight_new_born = new_born_particle_weight * normalization_coefficient;
 
         /** Add new born particles **/
-        static int min_static_new_born_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.2f);
+        static int min_static_new_born_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.15f);
         static int static_new_born_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.4f);  // static points takes 3 in 10
         static int pf_derive_new_born_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.5f); // Derived takes half
         static const int model_generated_particle_number_each_point = (int)((float)new_born_particle_number_each_point * 0.8f);
 
         int successfully_born_particles = 0;
+        /// TODO: Improve efficiency in this new born procedure
         for(auto & point : *input_cloud_with_velocity)
         {
             pcl::PointXYZ p_corrected;
@@ -832,7 +910,6 @@ public:
             float dynamic_particle_weight_sum = 0.f;
             float static_or_dynamic_weight_sum = 0.f;
 
-            /// TODO: Improve efficiency in this weight summation calculation procedure
             if(getParticleVoxelsIndex(p_corrected.x, p_corrected.y, p_corrected.z, point_voxel_index)){
                 //This condition should always be true because the point cloud outside of the map should be omitted in the first place. Just an insurance.
                 for(int kk=0; kk<SAFE_PARTICLE_NUM_VOXEL; ++kk){
@@ -856,6 +933,24 @@ public:
                 continue;
             }
 
+            // Dempster-Shafer Theory
+            float total_weight_voxel = static_particle_weight_sum + dynamic_particle_weight_sum + static_or_dynamic_weight_sum;
+            float m_static = static_particle_weight_sum / total_weight_voxel;
+            float m_dynamic = dynamic_particle_weight_sum / total_weight_voxel;
+            float m_static_or_dynamic = static_or_dynamic_weight_sum / total_weight_voxel;
+
+            float p_static = (m_static + m_static + m_static_or_dynamic) * 0.5f;
+            float p_dynamic = (m_dynamic + m_dynamic + m_static_or_dynamic) * 0.5f;
+            float normalization_p = p_static + p_dynamic;
+            float p_static_normalized = p_static / normalization_p;
+            float p_dynamic_normalized = p_dynamic / normalization_p;
+
+            static_new_born_particle_number_each_point = (int)((float)model_generated_particle_number_each_point * p_static_normalized);
+            pf_derive_new_born_particle_number_each_point = model_generated_particle_number_each_point - static_new_born_particle_number_each_point;
+
+            // Set a minimum number of static particles
+            static_new_born_particle_number_each_point = max(min_static_new_born_particle_number_each_point, static_new_born_particle_number_each_point);
+
             for(int p=0; p<new_born_particle_number_each_point; p++){
                 std::shared_ptr<Particle> particle_ptr{new Particle};
 
@@ -865,9 +960,37 @@ public:
 
                 if (getParticleVoxelsIndex(*particle_ptr, particle_ptr->voxel_index)) {
                     // Particle index might be different from the point index because a random Gaussian is added.
-                    particle_ptr->vx = 0.f;
-                    particle_ptr->vy = 0.f;
+                    if(p < static_new_born_particle_number_each_point){  // add static points
+                        particle_ptr->vx = 0.f;
+                        particle_ptr->vy = 0.f;
+                        particle_ptr->vz = 0.f;
+                    }else if(point.normal_x > -100.f && p < model_generated_particle_number_each_point){ //p < pf_derive_new_born_particle_number_each_point + static_new_born_particle_number_each_point){
+                        /// Use estimated velocity to generate new particles
+                        if(point.intensity > 0.01f){
+                            particle_ptr->vx = point.normal_x + 4*getVelocityGaussianZeroCenter();
+                            particle_ptr->vy = point.normal_y + 4*getVelocityGaussianZeroCenter();
+                            particle_ptr->vz = point.normal_z + 4*getVelocityGaussianZeroCenter();
+                        }else{ //static points like ground
+                            particle_ptr->vx = 0.f;
+                            particle_ptr->vy = 0.f;
+                            particle_ptr->vz = 0.f;
+                        }
+                    }
+                    else{ /// Considering Random Noise
+                        if(point.intensity > 0.01f){
+                            particle_ptr->vx = generateRandomFloat(-1.5f, 1.5f);
+                            particle_ptr->vy = generateRandomFloat(-1.5f, 1.5f);
+                            particle_ptr->vz = generateRandomFloat(-0.5f, 0.5f);
+                        }else{ //static points like ground
+                            particle_ptr->vx = 0.f;
+                            particle_ptr->vy = 0.f;
+                            particle_ptr->vz = 0.f;
+                        }
+                    }
+
+#if(LIMIT_MOVEMENT_IN_XY_PLANE)
                     particle_ptr->vz = 0.f;
+#endif
 
                     particle_ptr->weight = updated_weight_new_born;
 
@@ -1017,6 +1140,20 @@ private:
 
         }
 
+//        // Resampling result analysis
+//        int particle_num_after_resampling = 0;
+//
+//        for(int v_index=0; v_index<VOXEL_NUM; ++v_index)
+//        {
+//            for(int i=0; i<SAFE_PARTICLE_NUM_VOXEL; i++){
+//                if(voxels_with_particle[v_index][i][0] > 0.1f){
+//                    ++ particle_num_after_resampling;
+//                }
+//            }
+//        }
+//        cout <<"particle_num_after_resampling_should_be="<<particle_num_after_resampling_should_be<<endl;
+//        cout <<"particle_num_after_resampling="<<particle_num_after_resampling<<endl;
+//        cout <<"removed_particle_counter="<<removed_particle_counter<<endl;
     }
 
 
@@ -1112,12 +1249,14 @@ private: /*** Some specific functions ***/
 
     void generateGaussianRandomsVectorZeroCenter() const{
         std::default_random_engine random(time(NULL));
-        std::normal_distribution<double> n1(0, position_prediction_stddev);
-        std::normal_distribution<double> n2(0, velocity_prediction_stddev);
+        std::normal_distribution<float> n1(0, position_prediction_stddev);
+        std::normal_distribution<float> n2(0, velocity_prediction_stddev);
+        std::normal_distribution<float> n3(0, sigma_localization);
 
         for(int i=0; i<GAUSSIAN_RANDOMS_NUM; i++){
             *(p_gaussian_randoms+i) = n1(random);
             *(v_gaussian_randoms+i) = n2(random);
+            *(localization_gaussian_randoms+i) = n3(random);
         }
 
     }
@@ -1127,6 +1266,16 @@ private: /*** Some specific functions ***/
         position_gaussian_random_seq += 1;
         if(position_gaussian_random_seq >= GAUSSIAN_RANDOMS_NUM){
             position_gaussian_random_seq = 0;
+        }
+        return delt_p;
+    }
+
+
+    float getLocalizationGaussianZeroCenter(){
+        float delt_p = localization_gaussian_randoms[localization_gaussian_random_seq];
+        localization_gaussian_random_seq += 1;
+        if(localization_gaussian_random_seq >= GAUSSIAN_RANDOMS_NUM){
+            localization_gaussian_random_seq = 0;
         }
         return delt_p;
     }
@@ -1288,9 +1437,14 @@ private: /*** Some specific functions ***/
         return x1*x2 + y1*y2 + z1*z2;
     }
 
+//    static void vectorCOut(float *a){
+//        cout<<"("<< *a <<","<< *(a+1)<<","<< *(a+2)<<") ";
+//    }
 
     int ifInPyramidsArea(float &x, float &y, float &z)
     {
+//        vectorCOut(&pyramid_BPnorm_params_v[observation_pyramid_num_v][0]);
+
         if(vectorMultiply(x,y,z, pyramid_BPnorm_params_h[0][0], pyramid_BPnorm_params_h[0][1], pyramid_BPnorm_params_h[0][2]) >= 0.f
           && vectorMultiply(x,y,z, pyramid_BPnorm_params_h[observation_pyramid_num_h][0], pyramid_BPnorm_params_h[observation_pyramid_num_h][1], pyramid_BPnorm_params_h[observation_pyramid_num_h][2]) <= 0.f
           && vectorMultiply(x,y,z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1], pyramid_BPnorm_params_v[0][2]) <= 0.f
@@ -1339,13 +1493,12 @@ private: /*** Some specific functions ***/
 
     static void velocityEstimationThread()
     {
-        /// Static model. Zero velocity
         if( cloud_in_current_view_rotated->points.empty()) return;
 
         input_cloud_with_velocity->clear();
 
         /// Remove ground and transform data
-        pcl::PointCloud<pcl::PointXYZ>::Ptr ground_points(new pcl::PointCloud<pcl::PointXYZ>());
+        pcl::PointCloud<pcl::PointXYZ>::Ptr static_points(new pcl::PointCloud<pcl::PointXYZ>());
         pcl::PointCloud<pcl::PointXYZ>::Ptr non_ground_points(new pcl::PointCloud<pcl::PointXYZ>());
 
         for(auto &p : cloud_in_current_view_rotated->points){
@@ -1354,17 +1507,157 @@ private: /*** Some specific functions ***/
             transformed_p.y = p.y + current_position[1];
             transformed_p.z = p.z + current_position[2];
 
-            pcl::PointXYZINormal p2;
-            p2.x = transformed_p.x;
-            p2.y = transformed_p.y;
-            p2.z = transformed_p.z;
-            p2.normal_x = 0.f;
-            p2.normal_y = 0.f;
-            p2.normal_z = 0.f;
-            p2.intensity = 0.f;
-            input_cloud_with_velocity->push_back(p2);
+            if(transformed_p.z > voxel_filtered_resolution){
+                non_ground_points->points.push_back(transformed_p);
+            }else{
+                static_points->points.push_back(transformed_p);
+            }
         }
 
+        /// Cluster
+        static std::vector<ClusterFeature> clusters_feature_vector_dynamic_last;
+        std::vector<ClusterFeature> clusters_feature_vector_dynamic;
+        std::vector<pcl::PointIndices> cluster_indices;
+        vector<bool> cluster_possibly_dynamic;
+
+        if(!non_ground_points->empty()){
+            pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
+            tree->setInputCloud (non_ground_points);
+
+            pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
+            ec.setClusterTolerance (2*voxel_filtered_resolution);
+            ec.setMinClusterSize (5);
+            ec.setMaxClusterSize (10000);
+
+            ec.setSearchMethod (tree);
+            ec.setInputCloud (non_ground_points);
+            ec.extract (cluster_indices);
+
+            for(const auto & cluster_indice : cluster_indices)
+            {
+                ClusterFeature cluster_this;
+                cluster_this.intensity = generateRandomFloat(0.1f, 1.f); //For visualization
+
+                for (int indice : cluster_indice.indices){
+                    cluster_this.center_x += (*non_ground_points)[indice].x; //sum
+                    cluster_this.center_y += (*non_ground_points)[indice].y;
+                    cluster_this.center_z += (*non_ground_points)[indice].z;
+                    ++ cluster_this.point_num;
+                }
+
+                // average
+                cluster_this.center_x /= (float)cluster_this.point_num;
+                cluster_this.center_y /= (float)cluster_this.point_num;
+                cluster_this.center_z /= (float)cluster_this.point_num;
+
+                if(cluster_indice.indices.size() > 150 || cluster_this.center_z > 1.4){ //filter static points  //400, 1.5
+                    // Static
+                    for (int indice : cluster_indice.indices){
+                        static_points->push_back((*non_ground_points)[indice]);
+                    }
+                    cluster_possibly_dynamic.push_back(false);
+                }else{
+                    // Possibly dynamic
+                    clusters_feature_vector_dynamic.push_back(cluster_this);
+                    cluster_possibly_dynamic.push_back(true);
+                }
+            }
+
+            static float distance_gate = 1.5f;
+            static int point_num_gate = 100;
+            static float maximum_velocity = 5.f;
+
+            /// Move last feature vector d and match by KM algorithm
+            if(!clusters_feature_vector_dynamic_last.empty() && !clusters_feature_vector_dynamic.empty()){
+                if(delt_t_from_last_observation > 0.00001 && delt_t_from_last_observation < 10.0){
+                    Matrix<float> matrix_cost(clusters_feature_vector_dynamic.size(), clusters_feature_vector_dynamic_last.size()); //This is a Matrix defined in munkres.h
+                    Matrix<float> matrix_gate(clusters_feature_vector_dynamic.size(), clusters_feature_vector_dynamic_last.size());
+
+                    for(int row=0; row < clusters_feature_vector_dynamic.size(); ++row)
+                    {
+                        for(int col=0; col < clusters_feature_vector_dynamic_last.size(); ++col){
+                            float cluster_distance_this = clusterDistance(clusters_feature_vector_dynamic[row], clusters_feature_vector_dynamic_last[col]);
+                            if(abs(clusters_feature_vector_dynamic[row].point_num - clusters_feature_vector_dynamic_last[col].point_num) > point_num_gate
+                               || cluster_distance_this >= distance_gate){
+                                matrix_gate(row, col) = 0.f;
+                                matrix_cost(row, col) = distance_gate * 5000.f;
+                            }else{
+                                matrix_gate(row, col) = 1.f;
+                                matrix_cost(row, col) = cluster_distance_this / distance_gate * 1000.f;
+                            }
+                        }
+                    }
+
+                    Munkres<float> munkres_solver;
+                    munkres_solver.solve(matrix_cost);
+
+                    for(int row=0; row < clusters_feature_vector_dynamic.size(); ++row)
+                    {
+                        for(int col=0; col < clusters_feature_vector_dynamic_last.size(); ++col)
+                        {
+                            if(matrix_cost(row, col) == 0.f && matrix_gate(row, col) > 0.01f){ // Found a match
+                                clusters_feature_vector_dynamic[row].match_cluster_seq = col;
+                                clusters_feature_vector_dynamic[row].vx = (clusters_feature_vector_dynamic[row].center_x - clusters_feature_vector_dynamic_last[col].center_x) / delt_t_from_last_observation;
+                                clusters_feature_vector_dynamic[row].vy = (clusters_feature_vector_dynamic[row].center_y - clusters_feature_vector_dynamic_last[col].center_y) / delt_t_from_last_observation;
+                                clusters_feature_vector_dynamic[row].vz = (clusters_feature_vector_dynamic[row].center_z - clusters_feature_vector_dynamic_last[col].center_z) / delt_t_from_last_observation;
+//                        cout << "v=("<<clusters_feature_vector_dynamic[row].vx<<", " << clusters_feature_vector_dynamic[row].vy <<", "<<clusters_feature_vector_dynamic[row].vz << ")" << endl;
+                                clusters_feature_vector_dynamic[row].v = sqrtf(clusters_feature_vector_dynamic[row].vx * clusters_feature_vector_dynamic[row].vx + clusters_feature_vector_dynamic[row].vy * clusters_feature_vector_dynamic[row].vy + clusters_feature_vector_dynamic[row].vz * clusters_feature_vector_dynamic[row].vz);
+                                clusters_feature_vector_dynamic[row].intensity = clusters_feature_vector_dynamic_last[col].intensity; //for visualization
+
+                                if(clusters_feature_vector_dynamic[row].v > maximum_velocity){
+                                    clusters_feature_vector_dynamic[row].v = 0.f;
+                                    clusters_feature_vector_dynamic[row].vx = clusters_feature_vector_dynamic[row].vy = clusters_feature_vector_dynamic[row].vz = 0.f;
+                                }
+
+                                break;
+                            }
+                            /// If no match is found. The cluster velocity is given by struct initialization (v=-1000).
+                        }
+                    }
+                }
+            }
+
+            /// Velocity Allocation to Points
+            // Use normal to store velocity
+            int cluster_indice_seq = 0;
+            int cluster_dynamic_vector_seq = 0;
+            for(const auto & cluster_indice : cluster_indices) {
+                if(cluster_possibly_dynamic[cluster_indice_seq]){
+                    for (int indice : cluster_indice.indices) {
+                        pcl::PointXYZINormal p;
+                        p.x = (*non_ground_points)[indice].x;
+                        p.y = (*non_ground_points)[indice].y;
+                        p.z = (*non_ground_points)[indice].z;
+                        p.normal_x = clusters_feature_vector_dynamic[cluster_dynamic_vector_seq].vx;  // Use color to store velocity
+                        p.normal_y = clusters_feature_vector_dynamic[cluster_dynamic_vector_seq].vy;
+                        p.normal_z = clusters_feature_vector_dynamic[cluster_dynamic_vector_seq].vz;
+                        p.intensity = clusters_feature_vector_dynamic[cluster_dynamic_vector_seq].intensity; // For visualization. // clusters_feature_vector_dynamic[cluster_indice_seq].v / maximum_velocity;
+                        input_cloud_with_velocity->push_back(p);
+                    }
+                    ++ cluster_dynamic_vector_seq;
+                }
+
+                ++ cluster_indice_seq;
+            }
+
+        }
+
+
+        for(auto &static_point : static_points->points)
+        {
+            pcl::PointXYZINormal p;
+            p.x = static_point.x;
+            p.y = static_point.y;
+            p.z = static_point.z;
+            p.normal_x = 0.f;
+            p.normal_y = 0.f;
+            p.normal_z = 0.f;
+            p.intensity = 0.f;
+            input_cloud_with_velocity->push_back(p);
+        }
+
+        clusters_feature_vector_dynamic_last = clusters_feature_vector_dynamic;
+        cout << "Velocity estimation done" << endl;
     }
 
 
