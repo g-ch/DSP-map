@@ -13,7 +13,7 @@ Author: Gang Chen
 
 Date: 2021/8/19
 
-Description: This is the head file for the DSP map with constant velocity model. In this file, Parameter ANGLE_RESOLUTION (3 degrees) is not as small as the real sensor angle resolution (maybe smaller than 1 degree). This is not ideal to handle occlusion when very tiny obstacles exist but is efficient and sufficient in most scenarios. So it is recommended to use this head file.
+Description: This is the head file for the DSP map with constant velocity model. In this file, Parameter ANGLE_RESOLUTION (3 degrees) is not as small as the real sensor angle resolution (which may be smaller than 1 degree). This is not ideal to handle occlusion when very tiny obstacles exist but is efficient and sufficient in most scenarios. So it is recommended to use this head file.
 
 **************************************************************************/
 
@@ -74,6 +74,8 @@ static const float obstacle_thickness_for_occlusion = 0.3;
 #define O_MAKE_VALID 1       // use |= operator
 #define O_MAKE_INVALID  0    // use &= operator
 
+# define M_PIf32                3.14159265358979323846        /* pi */
+# define M_PI_2f32                1.57079632679489661923        /* pi/2 */
 
 /** Struct for an individual particle**/
 struct Particle{
@@ -210,8 +212,6 @@ public:
         delt_t_from_last_observation = delt_t;
 
         /** Update pyramid boundary planes' normal vectors' parameters **/
-
-
         sensor_rotation_quaternion[0] = sensor_quaternion_w;
         sensor_rotation_quaternion[1] = sensor_quaternion_x;
         sensor_rotation_quaternion[2] = sensor_quaternion_y;
@@ -301,7 +301,7 @@ public:
         }
 
 
-        /** Wait until optical flow calculation is finished **/
+        /** Wait until initial velocity estimation is finished **/
         velocity_estimation.join();
 
         /** Add updated new born particles ***/

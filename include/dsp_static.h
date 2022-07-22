@@ -71,6 +71,9 @@ static const int observation_max_points_num_one_pyramid = 100;
 #define O_MAKE_VALID 1       // use |= operator
 #define O_MAKE_INVALID  0    // use &= operator
 
+# define M_PIf32                3.14159265358979323846        /* pi */
+# define M_PI_2f32                1.57079632679489661923        /* pi/2 */
+
 using namespace std;
 
 /** Struct for an individual particle**/
@@ -298,7 +301,7 @@ public:
         }
 
 
-        /** Wait until optical flow calculation is finished **/
+        /** Wait until initial velocity estimation is finished **/
         velocity_estimation.join();
 
         /** Add updated new born particles ***/
