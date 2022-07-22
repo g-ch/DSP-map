@@ -319,9 +319,13 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
 
     int useful_point_num = 0;
     for(int i=0; i<cloud_filtered->width; i++){
-        float x = cloud_filtered->points.at(i).z;
-        float y = -cloud_filtered->points.at(i).x;
-        float z = -cloud_filtered->points.at(i).y;
+//        float x = cloud_filtered->points.at(i).z;
+//        float y = -cloud_filtered->points.at(i).x;
+//        float z = -cloud_filtered->points.at(i).y;
+
+        float x = cloud_filtered->points.at(i).x;
+        float y = cloud_filtered->points.at(i).y;
+        float z = cloud_filtered->points.at(i).z;
 
         if(inRange(x_min, x_max, x) && inRange(y_min, y_max, y) && inRange(z_min, z_max, z))
         {
@@ -514,6 +518,39 @@ void simPoseCallback(const geometry_msgs::PoseStamped &msg)
 }
 
 
+void simOdomCallback(const nav_msgs::Odometry &msg)
+{
+    if(!state_locked)
+    {
+        state_locked = true;
+        uav_position_global.x() = msg.pose.pose.position.x;
+        uav_position_global.y() = msg.pose.pose.position.y;
+        uav_position_global.z() = msg.pose.pose.position.z;
+
+        uav_att_global.x() = msg.pose.pose.orientation.x;
+        uav_att_global.y() = msg.pose.pose.orientation.y;
+        uav_att_global.z() = msg.pose.pose.orientation.z;
+        uav_att_global.w() = msg.pose.pose.orientation.w;
+
+        uav_position_global_queue.push(uav_position_global);
+        uav_att_global_queue.push(uav_att_global);
+        pose_att_time_queue.push(msg.header.stamp.toSec());
+        ROS_INFO("Pose updated");
+    }
+
+    state_locked = false;
+
+    Eigen::Quaternionf axis; //= quad * q1 * quad.inverse();
+    axis.w() = cos(-M_PI/4.0);
+    axis.x() = 0.0;
+    axis.y() = 0.0;
+    axis.z() = sin(-M_PI/4.0);
+    Eigen::Quaternionf rotated_att = uav_att_global * axis;
+
+    showFOV(uav_position_global, rotated_att, 90.0 / 180.0 * M_PI, 54.0 / 180.0 * M_PI , 5);
+}
+
+
 int main(int argc, char **argv)
 {
     ros::init(argc, argv, "map_sim_example_with_cluster");
@@ -533,8 +570,10 @@ int main(int argc, char **argv)
     ros::Subscriber object_states_sub = n.subscribe("/gazebo/model_states", 1, simObjectStateCallback);
 
     /// Input data for the map
-    ros::Subscriber point_cloud_sub = n.subscribe("/camera_front/depth/points", 1, cloudCallback);
-    ros::Subscriber pose_sub = n.subscribe("/mavros/local_position/pose", 1, simPoseCallback);
+//    ros::Subscriber point_cloud_sub = n.subscribe("/camera_front/depth/points", 1, cloudCallback);
+    ros::Subscriber point_cloud_sub = n.subscribe("/velodyne_points", 1, cloudCallback);
+    ros::Subscriber pose_sub = n.subscribe("/odometry/filtered", 1, simOdomCallback);
+//    ros::Subscriber pose_sub = n.subscribe("/mavros/local_position/pose", 1, simPoseCallback);
 
     /// Visualization topics
     cloud_pub = n.advertise<sensor_msgs::PointCloud2>("/my_map/cloud_ob", 1, true);

@@ -46,8 +46,8 @@ using namespace std;
 #define PREDICTION_TIMES 6
 static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f, 1.f, 1.5f, 2.f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
-const int half_fov_h = 45;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
-const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
+#define HALF_FOV_H  180  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
+#define HALF_FOV_V  18  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
 
 #define DYNAMIC_CLUSTER_MAX_POINT_NUM 200 // Pre-velocity estimation parameter. Cluster with too many points will be allocated with a zero velocity.
 #define DYNAMIC_CLUSTER_MAX_CENTER_HEIGHT 1.5 // Pre-velocity estimation parameter. Cluster with too high center will be allocated with a zero velocity.
@@ -55,15 +55,15 @@ const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modif
 string particle_save_folder = "/home/clarence";
 /** END **/
 
-static const int observation_pyramid_num_h = (int)half_fov_h * 2 / ANGLE_RESOLUTION;
-static const int observation_pyramid_num_v = (int)half_fov_v * 2 / ANGLE_RESOLUTION;
+static const int observation_pyramid_num_h = (int)(HALF_FOV_H * 2 / ANGLE_RESOLUTION);
+static const int observation_pyramid_num_v = (int)(HALF_FOV_V * 2 / ANGLE_RESOLUTION);
 static const int observation_pyramid_num = observation_pyramid_num_h * observation_pyramid_num_v;
 
 static const int VOXEL_NUM = MAP_LENGTH_VOXEL_NUM*MAP_WIDTH_VOXEL_NUM*MAP_HEIGHT_VOXEL_NUM;
-static const int PYRAMID_NUM = 360*180/ANGLE_RESOLUTION/ANGLE_RESOLUTION;
+static const int MAX_PYRAMID_NUM = 360*180/ANGLE_RESOLUTION/ANGLE_RESOLUTION;
 static const int SAFE_PARTICLE_NUM = VOXEL_NUM * MAX_PARTICLE_NUM_VOXEL + 1e5;
 static const int SAFE_PARTICLE_NUM_VOXEL = MAX_PARTICLE_NUM_VOXEL * 2;
-static const int SAFE_PARTICLE_NUM_PYRAMID = SAFE_PARTICLE_NUM/PYRAMID_NUM * 2;
+static const int SAFE_PARTICLE_NUM_PYRAMID = SAFE_PARTICLE_NUM/MAX_PYRAMID_NUM * 2;
 
 //An estimated number. If the observation points are too dense (over 100 points in one pyramid), the overflowed points will be ignored. It is suggested to use a voxel filter to the original point cloud.
 static const int observation_max_points_num_one_pyramid = 100;
@@ -444,7 +444,7 @@ public:
 
 
     ///NOTE: If you don't want to use any visualization functions like "getOccupancyMap"
-    ///      or "getOccupancyMapWithVelocity", you must call this function after update process.
+    ///      or "getOccupancyMapWithVelocity", you must call this function after the update process.
     void clearOccupancyMapPrediction(){
         for(int i=0; i<voxels_total_num; i++){
             for(int j=4; j<voxels_objects_number_dimension; ++j)
@@ -469,8 +469,6 @@ private:
     int voxel_num_z;
     float voxel_resolution;
 
-    int pyramid_num_h;
-    int pyramid_num_v;
     int angle_resolution;
     float angle_resolution_half;
 
@@ -478,7 +476,6 @@ private:
     float angle_resolution_rad_half;
 
     int voxels_total_num;
-    int pyramid_total_num;
 
     float map_length_x_half; // real size, m
     float map_length_y_half; // real size, m
@@ -548,12 +545,8 @@ private:
 
         voxels_total_num = VOXEL_NUM;
 
-        pyramid_num_h = 360 / angle_resolution;
-        pyramid_num_v = 180 / angle_resolution;
-        pyramid_total_num = PYRAMID_NUM;
-
-        half_fov_h_rad = (float)half_fov_h / 180.f * M_PIf32;
-        half_fov_v_rad = (float)half_fov_v / 180.f * M_PIf32;
+        half_fov_h_rad = (float)HALF_FOV_H / 180.f * M_PIf32;
+        half_fov_v_rad = (float)HALF_FOV_V / 180.f * M_PIf32;
 
         angle_resolution_half = (float)angle_resolution /  2.f;
 
@@ -574,19 +567,25 @@ private:
             for(auto & p : pyramid){
                 p[0] = 0;
                 p[1] = 0;
+//                p[3] = 0; ///TODO: check if right
             }
         }
 
-        /// New: set pyramid plane initial parameters
-        int h_start_seq = - half_fov_h / angle_resolution;
-        int h_end_seq = -h_start_seq;
+        /// New: set pyramid plane initial parameters.
+        /// When HALF_FOV_H < 180 (namely the sensor is not omnidirectional), if the number of pyramids is n then the number of planes is n+1.
+        /// When HALF_FOV_H = 180, the start plane and the end plane are the same.
+
+        int h_start_seq = - HALF_FOV_H / angle_resolution; //negative
+        int h_end_seq = -h_start_seq; //positive
+
+        /// TODO: Check h angle > 180
         for(int i=h_start_seq; i<=h_end_seq; i++){
             pyramid_BPnorm_params_ori_h[i+h_end_seq][0] = -sin((float)i*angle_resolution_rad); // x
             pyramid_BPnorm_params_ori_h[i+h_end_seq][1] = cos((float)i*angle_resolution_rad); // y
             pyramid_BPnorm_params_ori_h[i+h_end_seq][2] = 0.f; // z
         }
 
-        int v_start_seq = -half_fov_v / angle_resolution;
+        int v_start_seq = -HALF_FOV_V / angle_resolution;
         int v_end_seq = -v_start_seq;
         for(int i=v_start_seq; i<=v_end_seq; i++){
             pyramid_BPnorm_params_ori_v[i+v_end_seq][0] = sin((float)i*angle_resolution_rad);  // x
@@ -1074,7 +1073,7 @@ private:
     }
 
 
-private: /*** Some specific functions ***/
+private:
 
     int getParticleVoxelsIndex(const Particle &p, int &index){
         if(ifParticleIsOut(p)){return 0;}
@@ -1140,29 +1139,6 @@ private: /*** Some specific functions ***/
         }
         else return 0;
     }
-
-
-    static void findPyramidNeighborIndexInFOV(const int &index_ori, int &neighbor_spaces_num, int *neighbor_spaces_index)
-    {
-        int h_index_ori = index_ori / observation_pyramid_num_v;
-        int v_index_ori = index_ori % observation_pyramid_num_v;
-
-        neighbor_spaces_num = 0;
-
-        for(int i=-1; i<=1; ++i){
-            for(int j=-1; j<=1; ++j){
-                int h = h_index_ori + i;
-                int v = v_index_ori + j;
-                if(h>=0 && h<observation_pyramid_num_h && v>=0 && v<observation_pyramid_num_v)
-                {
-                    *(neighbor_spaces_index + neighbor_spaces_num) = h*observation_pyramid_num_v + v;
-                    ++ neighbor_spaces_num;
-                }
-            }
-        }
-
-    }
-
 
     void generateGaussianRandomsVectorZeroCenter() const{
         std::default_random_engine random(time(NULL));
@@ -1338,31 +1314,78 @@ private: /*** Some specific functions ***/
         *(rotated_vector+2) = vector_quaternion.z();
     }
 
-    static float vectorMultiply(float &x1, float &y1, float &z1, float &x2, float &y2, float &z2){
+    static float vectorDotProduct(float &x1, float &y1, float &z1, float &x2, float &y2, float &z2){
         return x1*x2 + y1*y2 + z1*z2;
     }
 
-
+    /// TODO: Check the situation when FOV H angle > 180
     int ifInPyramidsArea(float &x, float &y, float &z)
     {
-        if(vectorMultiply(x,y,z, pyramid_BPnorm_params_h[0][0], pyramid_BPnorm_params_h[0][1], pyramid_BPnorm_params_h[0][2]) >= 0.f
-          && vectorMultiply(x,y,z, pyramid_BPnorm_params_h[observation_pyramid_num_h][0], pyramid_BPnorm_params_h[observation_pyramid_num_h][1], pyramid_BPnorm_params_h[observation_pyramid_num_h][2]) <= 0.f
-          && vectorMultiply(x,y,z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1], pyramid_BPnorm_params_v[0][2]) <= 0.f
-          && vectorMultiply(x,y,z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0], pyramid_BPnorm_params_v[observation_pyramid_num_v][1], pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) >= 0.f){
+
+#if(HALF_FOV_H == 180)
+        if(vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1], pyramid_BPnorm_params_v[0][2]) <= 0.f
+           && vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0], pyramid_BPnorm_params_v[observation_pyramid_num_v][1], pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) >= 0.f){
             return 1;
         }else{
             return 0;
         }
+#elif(HALF_FOV_H >= 90)
+        if((vectorDotProduct(x, y, z, pyramid_BPnorm_params_h[0][0], pyramid_BPnorm_params_h[0][1],
+                             pyramid_BPnorm_params_h[0][2]) >= 0.f
+            || vectorDotProduct(x, y, z, pyramid_BPnorm_params_h[observation_pyramid_num_h][0],
+                                pyramid_BPnorm_params_h[observation_pyramid_num_h][1],
+                                pyramid_BPnorm_params_h[observation_pyramid_num_h][2]) <= 0.f)
+           && vectorDotProduct(x, y, z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1],
+                               pyramid_BPnorm_params_v[0][2]) <= 0.f
+           && vectorDotProduct(x, y, z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0],
+                               pyramid_BPnorm_params_v[observation_pyramid_num_v][1],
+                               pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) >= 0.f){
+            return 1;
+        }else{
+            return 0;
+        }
+#else
+        if(vectorDotProduct(x,y,z, pyramid_BPnorm_params_h[0][0], pyramid_BPnorm_params_h[0][1], pyramid_BPnorm_params_h[0][2]) >= 0.f
+           && vectorDotProduct(x,y,z, pyramid_BPnorm_params_h[observation_pyramid_num_h][0], pyramid_BPnorm_params_h[observation_pyramid_num_h][1], pyramid_BPnorm_params_h[observation_pyramid_num_h][2]) <= 0.f
+           && vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1], pyramid_BPnorm_params_v[0][2]) <= 0.f
+           && vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0], pyramid_BPnorm_params_v[observation_pyramid_num_v][1], pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) >= 0.f){
+            return 1;
+        }else{
+            return 0;
+        }
+#endif
     }
 
+
+    /// TODO: Check the situation when FOV H angle > 180
     int findPointPyramidHorizontalIndex(float &x, float &y, float &z){  /// The point should already be inside of Pyramids Area
-        float last_dot_multiply = 1.f; // for horizontal direction, if the point is inside of Pyramids Area. The symbol of the first dot multiplication should be positive
-        for(int i=0; i< observation_pyramid_num_h; i++){
-            float this_dot_multiply = vectorMultiply(x, y, z, pyramid_BPnorm_params_h[i+1][0], pyramid_BPnorm_params_h[i+1][1], pyramid_BPnorm_params_h[i+1][2]);
-            if(last_dot_multiply * this_dot_multiply <= 0.f){
-                return i;
+        float last_dot_multiply = vectorDotProduct(x, y, z, pyramid_BPnorm_params_h[0][0],
+                                                   pyramid_BPnorm_params_h[0][1],
+                                                   pyramid_BPnorm_params_h[0][2]);
+
+        if(last_dot_multiply > 0){
+            for(int i=0; i< observation_pyramid_num_h; ++i){
+                float this_dot_multiply = vectorDotProduct(x, y, z, pyramid_BPnorm_params_h[i + 1][0],
+                                                           pyramid_BPnorm_params_h[i + 1][1],
+                                                           pyramid_BPnorm_params_h[i + 1][2]);
+                if(last_dot_multiply * this_dot_multiply <= 0.f){
+                    return i;
+                }
+                last_dot_multiply = this_dot_multiply;
             }
-            last_dot_multiply = this_dot_multiply;
+        }else{  // Only happen when FOV H angle > 90
+            last_dot_multiply = vectorDotProduct(x, y, z, pyramid_BPnorm_params_h[observation_pyramid_num_h][0],
+                                                 pyramid_BPnorm_params_h[observation_pyramid_num_h][1],
+                                                 pyramid_BPnorm_params_h[observation_pyramid_num_h][2]);
+            for(int i=observation_pyramid_num_h-1; i >= 0; --i){  // Should return before i reaches observation_pyramid_num_h/2
+                float this_dot_multiply = vectorDotProduct(x, y, z, pyramid_BPnorm_params_h[i][0],
+                                                           pyramid_BPnorm_params_h[i][1],
+                                                           pyramid_BPnorm_params_h[i][2]);
+                if(last_dot_multiply * this_dot_multiply <= 0.f){
+                    return i;
+                }
+                last_dot_multiply = this_dot_multiply;
+            }
         }
 
         cout << "!!!!!! Please use Function ifInPyramidsArea() to filter the points first before using findPointPyramidHorizontalIndex()" <<endl;
@@ -1371,8 +1394,10 @@ private: /*** Some specific functions ***/
 
     int findPointPyramidVerticalIndex(float &x, float &y, float &z){  /// The point should already be inside of Pyramids Area
         float last_dot_multiply = -1.f; // for vertical direction, if the point is inside of Pyramids Area. The symbol of the first dot multiplication should be negative
-        for(int j=0; j< observation_pyramid_num_v; j++){
-            float this_dot_multiply = vectorMultiply(x, y, z, pyramid_BPnorm_params_v[j+1][0], pyramid_BPnorm_params_v[j+1][1], pyramid_BPnorm_params_v[j+1][2]);
+        for(int j=0; j< observation_pyramid_num_v; ++j){
+            float this_dot_multiply = vectorDotProduct(x, y, z, pyramid_BPnorm_params_v[j + 1][0],
+                                                       pyramid_BPnorm_params_v[j + 1][1],
+                                                       pyramid_BPnorm_params_v[j + 1][2]);
             if(last_dot_multiply * this_dot_multiply <= 0.f){
                 return j;
             }
@@ -1381,6 +1406,41 @@ private: /*** Some specific functions ***/
 
         cout << "!!!!!! Please use Function ifInPyramidsArea() to filter the points first before using findPyramidVerticalIndex()" <<endl;
         return -1; // This should not happen if the function is used properly
+    }
+
+    /// TODO: consider the situation when FOV H angle > 180
+    static void findPyramidNeighborIndexInFOV(const int &index_ori, int &neighbor_spaces_num, int *neighbor_spaces_index)
+    {
+        int h_index_ori = index_ori / observation_pyramid_num_v;
+        int v_index_ori = index_ori % observation_pyramid_num_v;
+
+        neighbor_spaces_num = 0;
+
+        for(int i=-1; i<=1; ++i){  /// One neighbor only
+            for(int j=-1; j<=1; ++j){
+                int h = h_index_ori + i;
+                int v = v_index_ori + j;
+
+#if(HALF_FOV_H == 180)
+                if(v>=0 && v<observation_pyramid_num_v)
+                {
+                    if(h == -1) {h = observation_pyramid_num_h-1;}
+                    else if(h == observation_pyramid_num_h) {h = 0;}
+
+                    *(neighbor_spaces_index + neighbor_spaces_num) = h*observation_pyramid_num_v + v;
+                    ++ neighbor_spaces_num;
+                }
+#else
+                if(h>=0 && h<observation_pyramid_num_h && v>=0 && v<observation_pyramid_num_v)
+                {
+                    *(neighbor_spaces_index + neighbor_spaces_num) = h*observation_pyramid_num_v + v;
+                    ++ neighbor_spaces_num;
+                }
+#endif
+
+            }
+        }
+
     }
 
     static float clusterDistance(ClusterFeature &c1, ClusterFeature &c2){
