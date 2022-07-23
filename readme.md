@@ -2,14 +2,12 @@
 This repository contains the head files of the Dual-Structure Particle-based (DSP) map
 and a ROS node example to use this map. For more information about the DSP map, see [video](https://www.youtube.com/watch?v=seF_Oy4YbXo&t=5s) and [preprint](https://arxiv.org/abs/2202.06273).
 
-There are three __head files__ in the `include` folder.
-1. ``dsp_dynamic.h`` is the head file for the DSP map with a constant velocity model. (Recommended for Type II dynamic occupancy map.)
-2. ``dsp_dynamic_multiple_neighbors.h`` is the head file for the DSP map with a constant velocity model. Check the Supplementary section below to know the difference between `dsp_dynamic` and `dsp_dynamic_multiple_neighbors`.
-3. ``dsp_static.h`` is the head file for the DSP map with the static model. (Type I dynamic occupancy map.)
+There are one __head files__ in the `include` folder.
+1. ``dsp_dynamic_omindirectional.h`` is the head file for the DSP map with a constant velocity model. This head file supports omnidirectional sensor like lidar.
 
 Just include one of the head files in your source file and use the map. We write everything in a single head!
 
-A ROS __node example__ `map_sim_example.cpp` can be found in the `src` folder. In the example, we subscribe point cloud from topic `/camera_front/depth/points` and pose from `/mavros/local_position/pose` to build the map. We publish the current occupancy status with topic `/my_map/cloud_ob` and one layer of the predicted future occupancy maps with topic `/my_map/future_status` in the point cloud form.
+A ROS __node example__ `map_sim_example.cpp` can be found in the `src` folder.
 
 
 # Compile
@@ -38,32 +36,18 @@ To compile the source code of our map, you need:
     catkin_make
     ```
 
-# Test
-Download a bag file named `street.bag` containing the point cloud and pose data collected with a drone in Gazebo. [Download](https://drive.google.com/file/d/1go4ALTe8CqaBY2wjZJzkUCmdlBI7yAAU/view?usp=sharing).
-Save the bag file in `data` folder.
-
-Launch a test by
-```
-cd map_ws
-source devel/setup.bash
-roslaunch dynamic_occpuancy_map mapping.launch
-```
-
-The launch file will start the example mapping node and open three rviz windows to show the current occupancy status (3D), predicted future occupancy status (2D, layer of a height set in `map_sim_example.cpp`), and the raw point cloud from the camera.
-
 # Parameters
-There are quite a few parameters in this map. But only `Camera FOV` is coupled with hardware and should be modified according to the real FOV of your camera.
+There are quite a few parameters in this map. But only `FOV` is coupled with hardware and should be modified according to the real FOV of your lidar.
 You can use default values for other parameters.
 
 ## Static parameters
 The following parameters can be found at the top of the map head file.
-1. Camera FOV. It is necessary to set the camera FOV angle for your camera. The unit is degree and we set the half-angle value.
+1. Sensor FOV. It is necessary to set the FOV angle for your lidar. The unit is degree and we set the half-angle value.
     ```
     const int HALF_FOV_H = 45;  // Half of the horizental angle. should be able to be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a little smaller value than the real FOV angle
     const int HALF_FOV_V = 27;  // Half of the vertical angle. Should be able to be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a little smaller value than the real FOV angle
     ```
 * The ``ANGLE_RESOLUTION`` is 3 in the head files. Don't change ``ANGLE_RESOLUTION`` unless you are very familiar with the way our map works.
-* Tips: Depth camera usually contains large noise near the edge of the image. You can make the FOV parameter a little smaller than the real FOV angle. But never make it larger.
 
 2. Change the size and resolution of the map by changing the following parameters:
     ```
@@ -118,13 +102,5 @@ If you use our code in your research, please cite
 
 # License
 MIT license.
-
-# Supplementary
-* __Difference between `dsp_dynamic` and `dsp_dynamic_multiple_neighbors`__:
-  In `dsp_dynamic.h`, Parameter ANGLE_RESOLUTION (3 degrees) is not as small as the real sensor angle resolution (may be smaller than 1 degree). This is not ideal to handle occlusion when very tiny obstacles exist but is efficient and sufficient in most scenarios.
-  In `dsp_dynamic_multiple_neighbors`, Parameter ANGLE_RESOLUTION can be as small as the real sensor angle resolution. A (2*PYRAMID_NEIGHBOR_N+1)^2 neighborhood pyramid space will be considered in the update. This is ideal to handle occlusion when very tiny obstacles exist but is less efficient.
-
-* __Difference between Type I and Type II dynamic occupancy map__: The type I map considers only to model the current status of dynamic obstacles. Type II considers short-term prediction of the future status of dynamic obstacles.
-
 
 
