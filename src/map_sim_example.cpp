@@ -46,7 +46,7 @@ queue<Eigen::Quaternionf> uav_att_global_queue;
 Eigen::Vector3d uav_position_global;
 Eigen::Quaternionf uav_att_global;
 
-const unsigned int MAX_POINT_NUM = 5000; // Estimated max point cloud number after down sample. To define the vector below.
+const unsigned int MAX_POINT_NUM = 10000; // Estimated max point cloud number after down sample. To define the vector below.
 float point_clouds[MAX_POINT_NUM*3]; // Container for point cloud. We use naive vector for efficiency purpose.
 
 // The following range parameters are calculated with map parameters to remove the point cloud outside of the map range.
@@ -262,46 +262,47 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
     Eigen::Vector3d uav_position = uav_position_global;
     Eigen::Quaternionf uav_att = uav_att_global;
 
-    static Eigen::Quaternionf quad_last_popped(-10.f, -10.f, -10.f, -10.f);
-    static Eigen::Vector3d position_last_popped(-10000.f, -10000.f, -10000.f);
-    static double last_popped_time = 0.0;
+//    static Eigen::Quaternionf quad_last_popped(-10.f, -10.f, -10.f, -10.f);
+//    static Eigen::Vector3d position_last_popped(-10000.f, -10000.f, -10000.f);
+//    static double last_popped_time = 0.0;
+//
+//
+//    ros::Rate loop_rate(500);
+//    while(state_locked){
+//        loop_rate.sleep();
+//        ros::spinOnce();
+//    }
+//    state_locked = true;
 
-    ros::Rate loop_rate(500);
-    while(state_locked){
-        loop_rate.sleep();
-        ros::spinOnce();
-    }
-    state_locked = true;
-
-    while(!pose_att_time_queue.empty()){   //Synchronize pose by queue
-        double time_stamp_pose = pose_att_time_queue.front();
-        if(time_stamp_pose >= cloud->header.stamp.toSec()){
-            uav_att = uav_att_global_queue.front();
-            uav_position = uav_position_global_queue.front();
-
-            // linear interpolation
-            if(quad_last_popped.x() >= -1.f){
-                double time_interval_from_last_time = time_stamp_pose - last_popped_time;
-                double time_interval_cloud = cloud->header.stamp.toSec() - last_popped_time;
-                double factor = time_interval_cloud / time_interval_from_last_time;
-                uav_att = quad_last_popped.slerp(factor, uav_att);
-                uav_position = position_last_popped * (1.0 - factor) + uav_position*factor;
-            }
-
-            ROS_INFO_THROTTLE(3.0, "cloud mismatch time = %lf", cloud->header.stamp.toSec() - time_stamp_pose);
-
-            break;
-        }
-
-        quad_last_popped = uav_att_global_queue.front();
-        position_last_popped = uav_position_global_queue.front();
-        last_popped_time = time_stamp_pose;
-
-        pose_att_time_queue.pop();
-        uav_att_global_queue.pop();
-        uav_position_global_queue.pop();
-    }
-    state_locked = false;
+//    while(!pose_att_time_queue.empty()){   //Synchronize pose by queue
+//        double time_stamp_pose = pose_att_time_queue.front();
+//        if(time_stamp_pose >= cloud->header.stamp.toSec()){
+//            uav_att = uav_att_global_queue.front();
+//            uav_position = uav_position_global_queue.front();
+//
+//            // linear interpolation
+//            if(quad_last_popped.x() >= -1.f){
+//                double time_interval_from_last_time = time_stamp_pose - last_popped_time;
+//                double time_interval_cloud = cloud->header.stamp.toSec() - last_popped_time;
+//                double factor = time_interval_cloud / time_interval_from_last_time;
+//                uav_att = quad_last_popped.slerp(factor, uav_att);
+//                uav_position = position_last_popped * (1.0 - factor) + uav_position*factor;
+//            }
+//
+//            ROS_INFO_THROTTLE(3.0, "cloud mismatch time = %lf", cloud->header.stamp.toSec() - time_stamp_pose);
+//
+//            break;
+//        }
+//
+//        quad_last_popped = uav_att_global_queue.front();
+//        position_last_popped = uav_position_global_queue.front();
+//        last_popped_time = time_stamp_pose;
+//
+//        pose_att_time_queue.pop();
+//        uav_att_global_queue.pop();
+//        uav_position_global_queue.pop();
+//    }
+//    state_locked = false;
 
 
     /// Point cloud preprocess
@@ -335,6 +336,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
             ++ useful_point_num;
 
             if(useful_point_num >= MAX_POINT_NUM){  // In case the buffer overflows
+                ROS_WARN("Point cloud reached max point number!");
                 break;
             }
         }
@@ -380,7 +382,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
      * future_status[*][0] is current status considering delay compensation.
     **/
 
-    my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.2); //0.25
+    my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.5); //0.25
 
     /// Publish Point cloud and center position
     pcl::toROSMsg(cloud_to_publish, cloud_to_pub_transformed);
@@ -535,7 +537,7 @@ void simOdomCallback(const nav_msgs::Odometry &msg)
         uav_position_global_queue.push(uav_position_global);
         uav_att_global_queue.push(uav_att_global);
         pose_att_time_queue.push(msg.header.stamp.toSec());
-        ROS_INFO("Pose updated");
+//        ROS_INFO("Pose updated");
     }
 
     state_locked = false;
@@ -547,7 +549,8 @@ void simOdomCallback(const nav_msgs::Odometry &msg)
     axis.z() = sin(-M_PI/4.0);
     Eigen::Quaternionf rotated_att = uav_att_global * axis;
 
-    showFOV(uav_position_global, rotated_att, 90.0 / 180.0 * M_PI, 54.0 / 180.0 * M_PI , 5);
+//    showFOV(uav_position_global, rotated_att, 90.0 / 180.0 * M_PI, 54.0 / 180.0 * M_PI , 5);
+    showFOV(uav_position_global, rotated_att, 90 / 180.0 * M_PI, 30 / 180.0 * M_PI , 5);
 }
 
 

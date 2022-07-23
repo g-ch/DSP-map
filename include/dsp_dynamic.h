@@ -46,8 +46,8 @@ using namespace std;
 #define PREDICTION_TIMES 6
 static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f, 1.f, 1.5f, 2.f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
-#define HALF_FOV_H  180  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
-#define HALF_FOV_V  18  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
+#define HALF_FOV_H 180  // [0, 180]. can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
+#define HALF_FOV_V 15  // [0, 60]. can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
 
 #define DYNAMIC_CLUSTER_MAX_POINT_NUM 200 // Pre-velocity estimation parameter. Cluster with too many points will be allocated with a zero velocity.
 #define DYNAMIC_CLUSTER_MAX_CENTER_HEIGHT 1.5 // Pre-velocity estimation parameter. Cluster with too high center will be allocated with a zero velocity.
@@ -165,6 +165,7 @@ public:
 
         addRandomParticles(init_particle_num, init_weight);
 
+        cout << "observation_pyramid_num_h = " << observation_pyramid_num_h <<", observation_pyramid_num_v = " << observation_pyramid_num_v << endl;
         cout << "Map is ready to update!" << endl;
     }
 
@@ -188,6 +189,8 @@ public:
             cout << "Invalid quaternion." <<endl;
             return 0;
         }
+
+        cout << "sensor_px=" << sensor_px << ", sensor_quaternion_z=" << sensor_quaternion_z << ", sensor_quaternion_w=" << sensor_quaternion_w << endl;
 
         float odom_delt_px = sensor_px - sensor_px_last;
         float odom_delt_py = sensor_py - sensor_py_last;
@@ -240,16 +243,16 @@ public:
             float rotated_point_this[3];
             rotateVectorByQuaternion(&point_cloud_ptr[iter_num], sensor_rotation_quaternion, rotated_point_this);
 
-            // Store in pcl point cloud for velocity estimation of new born particles
-            pcl::PointXYZ p_this;
-            p_this.x = rotated_point_this[0];
-            p_this.y = rotated_point_this[1];
-            p_this.z = rotated_point_this[2];
-            cloud_in_current_view_rotated->push_back(p_this);
-
             // Store in pyramids for update
             if(ifInPyramidsArea(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]))
             {
+                // Store in pcl point cloud for velocity estimation of new born particles
+                pcl::PointXYZ p_this;
+                p_this.x = rotated_point_this[0];
+                p_this.y = rotated_point_this[1];
+                p_this.z = rotated_point_this[2];
+                cloud_in_current_view_rotated->push_back(p_this);
+
                 int pyramid_index_h, pyramid_index_v;
                 pyramid_index_h = findPointPyramidHorizontalIndex(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]);
                 pyramid_index_v = findPointPyramidVerticalIndex(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]);
@@ -1321,10 +1324,9 @@ private:
     /// TODO: Check the situation when FOV H angle > 180
     int ifInPyramidsArea(float &x, float &y, float &z)
     {
-
 #if(HALF_FOV_H == 180)
-        if(vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1], pyramid_BPnorm_params_v[0][2]) <= 0.f
-           && vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0], pyramid_BPnorm_params_v[observation_pyramid_num_v][1], pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) >= 0.f){
+        if(vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1], pyramid_BPnorm_params_v[0][2]) *
+           vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0], pyramid_BPnorm_params_v[observation_pyramid_num_v][1], pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) < 0.f){
             return 1;
         }else{
             return 0;
@@ -1336,10 +1338,10 @@ private:
                                 pyramid_BPnorm_params_h[observation_pyramid_num_h][1],
                                 pyramid_BPnorm_params_h[observation_pyramid_num_h][2]) <= 0.f)
            && vectorDotProduct(x, y, z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1],
-                               pyramid_BPnorm_params_v[0][2]) <= 0.f
-           && vectorDotProduct(x, y, z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0],
+                               pyramid_BPnorm_params_v[0][2])
+           * vectorDotProduct(x, y, z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0],
                                pyramid_BPnorm_params_v[observation_pyramid_num_v][1],
-                               pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) >= 0.f){
+                               pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) < 0.f){
             return 1;
         }else{
             return 0;
@@ -1347,8 +1349,8 @@ private:
 #else
         if(vectorDotProduct(x,y,z, pyramid_BPnorm_params_h[0][0], pyramid_BPnorm_params_h[0][1], pyramid_BPnorm_params_h[0][2]) >= 0.f
            && vectorDotProduct(x,y,z, pyramid_BPnorm_params_h[observation_pyramid_num_h][0], pyramid_BPnorm_params_h[observation_pyramid_num_h][1], pyramid_BPnorm_params_h[observation_pyramid_num_h][2]) <= 0.f
-           && vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1], pyramid_BPnorm_params_v[0][2]) <= 0.f
-           && vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0], pyramid_BPnorm_params_v[observation_pyramid_num_v][1], pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) >= 0.f){
+           && vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[0][0], pyramid_BPnorm_params_v[0][1], pyramid_BPnorm_params_v[0][2])
+           * vectorDotProduct(x,y,z, pyramid_BPnorm_params_v[observation_pyramid_num_v][0], pyramid_BPnorm_params_v[observation_pyramid_num_v][1], pyramid_BPnorm_params_v[observation_pyramid_num_v][2]) <= 0.f){
             return 1;
         }else{
             return 0;
@@ -1393,7 +1395,10 @@ private:
     }
 
     int findPointPyramidVerticalIndex(float &x, float &y, float &z){  /// The point should already be inside of Pyramids Area
-        float last_dot_multiply = -1.f; // for vertical direction, if the point is inside of Pyramids Area. The symbol of the first dot multiplication should be negative
+        float last_dot_multiply = vectorDotProduct(x, y, z, pyramid_BPnorm_params_v[0][0],
+                                                   pyramid_BPnorm_params_v[0][1],
+                                                   pyramid_BPnorm_params_v[0][2]);
+
         for(int j=0; j< observation_pyramid_num_v; ++j){
             float this_dot_multiply = vectorDotProduct(x, y, z, pyramid_BPnorm_params_v[j + 1][0],
                                                        pyramid_BPnorm_params_v[j + 1][1],
@@ -1404,6 +1409,7 @@ private:
             last_dot_multiply = this_dot_multiply;
         }
 
+        cout << "Point=("<<x<<", "<<y<<", "<<z<<")"<<endl;
         cout << "!!!!!! Please use Function ifInPyramidsArea() to filter the points first before using findPyramidVerticalIndex()" <<endl;
         return -1; // This should not happen if the function is used properly
     }
