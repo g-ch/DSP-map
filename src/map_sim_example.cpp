@@ -19,7 +19,7 @@ Description: This is a ROS example to use the DSP map. The map object is my_map 
 
 
 #include "ros/ros.h"
-#include "dsp_dynamic.h" // You can change the head file to dsp_dynamic_multiple_neighbors.h or dsp_static.h to use different map types. For more information, please read the readme file.
+#include "dsp_dynamic_omnidirectional.h" // You can change the head file to dsp_dynamic_multiple_neighbors.h or dsp_static.h to use different map types. For more information, please read the readme file.
 #include <pcl/common/transforms.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/point_types.h>
@@ -561,7 +561,7 @@ int main(int argc, char **argv)
 
     /// Map parameters that can be changed dynamically. But usually we still use them as static parameters.
     my_map.setPredictionVariance(0.05, 0.05); // StdDev for prediction. velocity StdDev, position StdDev, respectively.
-    my_map.setObservationStdDev(0.1); // StdDev for update. position StdDev.
+    my_map.setObservationStdDev(0.2); // StdDev for update. position StdDev.
     my_map.setNewBornParticleNumberofEachPoint(20); // Number of new particles generated from one measurement point.
     my_map.setNewBornParticleWeight(0.0001); // Initial weight of particles.
     DSPMap::setOriginalVoxelFilterResolution(res); // Resolution of the voxel filter used for point cloud pre-process.
