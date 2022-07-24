@@ -74,8 +74,14 @@ static const float obstacle_thickness_for_occlusion = 0.3;
 #define O_MAKE_VALID 1       // use |= operator
 #define O_MAKE_INVALID  0    // use &= operator
 
-# define M_PIf32                3.14159265358979323846        /* pi */
-# define M_PI_2f32                1.57079632679489661923        /* pi/2 */
+#ifndef M_PIf32
+#define M_PIf32                3.14159265358979323846        /* pi */
+#endif
+
+#ifndef M_PI_2f32
+#define M_PI_2f32                1.57079632679489661923        /* pi/2 */
+#endif
+
 
 /** Struct for an individual particle**/
 struct Particle{
@@ -240,16 +246,16 @@ public:
             float rotated_point_this[3];
             rotateVectorByQuaternion(&point_cloud_ptr[iter_num], sensor_rotation_quaternion, rotated_point_this);
 
-            // Store in pcl point cloud for velocity estimation of new born particles
-            pcl::PointXYZ p_this;
-            p_this.x = rotated_point_this[0];
-            p_this.y = rotated_point_this[1];
-            p_this.z = rotated_point_this[2];
-            cloud_in_current_view_rotated->push_back(p_this);
-
             // Store in pyramids for update
             if(ifInPyramidsArea(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]))
             {
+                // Store in pcl point cloud for velocity estimation of new born particles
+                pcl::PointXYZ p_this;
+                p_this.x = rotated_point_this[0];
+                p_this.y = rotated_point_this[1];
+                p_this.z = rotated_point_this[2];
+                cloud_in_current_view_rotated->push_back(p_this);
+
                 int pyramid_index_h, pyramid_index_v;
                 pyramid_index_h = findPointPyramidHorizontalIndex(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]);
                 pyramid_index_v = findPointPyramidVerticalIndex(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]);

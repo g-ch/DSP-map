@@ -246,16 +246,16 @@ public:
             float rotated_point_this[3];
             rotateVectorByQuaternion(&point_cloud_ptr[iter_num], sensor_rotation_quaternion, rotated_point_this);
 
-            // Store in pcl point cloud for velocity estimation of new born particles
-            pcl::PointXYZ p_this;
-            p_this.x = rotated_point_this[0];
-            p_this.y = rotated_point_this[1];
-            p_this.z = rotated_point_this[2];
-            cloud_in_current_view_rotated->push_back(p_this);
-
             // Store in pyramids for update
             if(ifInPyramidsArea(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]))
             {
+                // Store in pcl point cloud for velocity estimation of new born particles
+                pcl::PointXYZ p_this;
+                p_this.x = rotated_point_this[0];
+                p_this.y = rotated_point_this[1];
+                p_this.z = rotated_point_this[2];
+                cloud_in_current_view_rotated->push_back(p_this);
+
                 int pyramid_index_h, pyramid_index_v;
                 pyramid_index_h = findPointPyramidHorizontalIndex(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]);
                 pyramid_index_v = findPointPyramidVerticalIndex(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]);
