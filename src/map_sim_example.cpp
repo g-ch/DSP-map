@@ -262,47 +262,47 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
     Eigen::Vector3d uav_position = uav_position_global;
     Eigen::Quaternionf uav_att = uav_att_global;
 
-//    static Eigen::Quaternionf quad_last_popped(-10.f, -10.f, -10.f, -10.f);
-//    static Eigen::Vector3d position_last_popped(-10000.f, -10000.f, -10000.f);
-//    static double last_popped_time = 0.0;
-//
-//
-//    ros::Rate loop_rate(500);
-//    while(state_locked){
-//        loop_rate.sleep();
-//        ros::spinOnce();
-//    }
-//    state_locked = true;
+    static Eigen::Quaternionf quad_last_popped(-10.f, -10.f, -10.f, -10.f);
+    static Eigen::Vector3d position_last_popped(-10000.f, -10000.f, -10000.f);
+    static double last_popped_time = 0.0;
 
-//    while(!pose_att_time_queue.empty()){   //Synchronize pose by queue
-//        double time_stamp_pose = pose_att_time_queue.front();
-//        if(time_stamp_pose >= cloud->header.stamp.toSec()){
-//            uav_att = uav_att_global_queue.front();
-//            uav_position = uav_position_global_queue.front();
-//
-//            // linear interpolation
-//            if(quad_last_popped.x() >= -1.f){
-//                double time_interval_from_last_time = time_stamp_pose - last_popped_time;
-//                double time_interval_cloud = cloud->header.stamp.toSec() - last_popped_time;
-//                double factor = time_interval_cloud / time_interval_from_last_time;
-//                uav_att = quad_last_popped.slerp(factor, uav_att);
-//                uav_position = position_last_popped * (1.0 - factor) + uav_position*factor;
-//            }
-//
-//            ROS_INFO_THROTTLE(3.0, "cloud mismatch time = %lf", cloud->header.stamp.toSec() - time_stamp_pose);
-//
-//            break;
-//        }
-//
-//        quad_last_popped = uav_att_global_queue.front();
-//        position_last_popped = uav_position_global_queue.front();
-//        last_popped_time = time_stamp_pose;
-//
-//        pose_att_time_queue.pop();
-//        uav_att_global_queue.pop();
-//        uav_position_global_queue.pop();
-//    }
-//    state_locked = false;
+
+    ros::Rate loop_rate(500);
+    while(state_locked){
+        loop_rate.sleep();
+        ros::spinOnce();
+    }
+    state_locked = true;
+
+    while(!pose_att_time_queue.empty()){   //Synchronize pose by queue
+        double time_stamp_pose = pose_att_time_queue.front();
+        if(time_stamp_pose >= cloud->header.stamp.toSec()){
+            uav_att = uav_att_global_queue.front();
+            uav_position = uav_position_global_queue.front();
+
+            // linear interpolation
+            if(quad_last_popped.x() >= -1.f){
+                double time_interval_from_last_time = time_stamp_pose - last_popped_time;
+                double time_interval_cloud = cloud->header.stamp.toSec() - last_popped_time;
+                double factor = time_interval_cloud / time_interval_from_last_time;
+                uav_att = quad_last_popped.slerp(factor, uav_att);
+                uav_position = position_last_popped * (1.0 - factor) + uav_position*factor;
+            }
+
+            ROS_INFO_THROTTLE(3.0, "cloud mismatch time = %lf", cloud->header.stamp.toSec() - time_stamp_pose);
+
+            break;
+        }
+
+        quad_last_popped = uav_att_global_queue.front();
+        position_last_popped = uav_position_global_queue.front();
+        last_popped_time = time_stamp_pose;
+
+        pose_att_time_queue.pop();
+        uav_att_global_queue.pop();
+        uav_position_global_queue.pop();
+    }
+    state_locked = false;
 
 
     /// Point cloud preprocess
@@ -328,7 +328,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
         float y = cloud_filtered->points.at(i).y;
         float z = cloud_filtered->points.at(i).z;
 
-        if(inRange(x_min, x_max, x) && inRange(y_min, y_max, y) && inRange(z_min, z_max, z))
+        if(inRange(x_min, x_max, x) && fabsf(x)>0.1f && inRange(y_min, y_max, y) && fabsf(y)>0.1f && inRange(z_min, z_max, z) && fabsf(z)>0.1f)
         {
             point_clouds[useful_point_num*3] = x;
             point_clouds[useful_point_num*3+1] = y;
@@ -382,7 +382,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
      * future_status[*][0] is current status considering delay compensation.
     **/
 
-    my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.25); //0.25
+    my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.2);
 
     /// Publish Point cloud and center position
     pcl::toROSMsg(cloud_to_publish, cloud_to_pub_transformed);
@@ -504,7 +504,7 @@ void simPoseCallback(const geometry_msgs::PoseStamped &msg)
         uav_position_global_queue.push(uav_position_global);
         uav_att_global_queue.push(uav_att_global);
         pose_att_time_queue.push(msg.header.stamp.toSec());
-        ROS_INFO("Pose updated");
+//        ROS_INFO("Pose updated");
     }
 
     state_locked = false;
@@ -550,7 +550,7 @@ void simOdomCallback(const nav_msgs::Odometry &msg)
     Eigen::Quaternionf rotated_att = uav_att_global * axis;
 
 //    showFOV(uav_position_global, rotated_att, 90.0 / 180.0 * M_PI, 54.0 / 180.0 * M_PI , 5);
-    showFOV(uav_position_global, rotated_att, 90 / 180.0 * M_PI, 30 / 180.0 * M_PI , 5);
+//    showFOV(uav_position_global, rotated_att, 90 / 180.0 * M_PI, 30 / 180.0 * M_PI , 5);
 }
 
 
@@ -561,7 +561,7 @@ int main(int argc, char **argv)
 
     /// Map parameters that can be changed dynamically. But usually we still use them as static parameters.
     my_map.setPredictionVariance(0.05, 0.05); // StdDev for prediction. velocity StdDev, position StdDev, respectively.
-    my_map.setObservationStdDev(0.2); // StdDev for update. position StdDev.
+    my_map.setObservationStdDev(0.05); // StdDev for update. position StdDev.
     my_map.setNewBornParticleNumberofEachPoint(20); // Number of new particles generated from one measurement point.
     my_map.setNewBornParticleWeight(0.0001); // Initial weight of particles.
     DSPMap::setOriginalVoxelFilterResolution(res); // Resolution of the voxel filter used for point cloud pre-process.
@@ -575,7 +575,7 @@ int main(int argc, char **argv)
     /// Input data for the map
 //    ros::Subscriber point_cloud_sub = n.subscribe("/camera_front/depth/points", 1, cloudCallback);
     ros::Subscriber point_cloud_sub = n.subscribe("/velodyne_points", 1, cloudCallback);
-    ros::Subscriber pose_sub = n.subscribe("/odometry/filtered", 1, simOdomCallback);
+    ros::Subscriber pose_sub = n.subscribe("/jackal_velocity_controller/odom", 1, simOdomCallback);
 //    ros::Subscriber pose_sub = n.subscribe("/mavros/local_position/pose", 1, simPoseCallback);
 
     /// Visualization topics

@@ -35,24 +35,27 @@ Description: This is the head file for the DSP map with constant velocity model.
 using namespace std;
 
 /** Parameters for the map **/
-#define MAP_LENGTH_VOXEL_NUM 66
-#define MAP_WIDTH_VOXEL_NUM 66
-#define MAP_HEIGHT_VOXEL_NUM 40
+#define MAP_LENGTH_VOXEL_NUM 79
+#define MAP_WIDTH_VOXEL_NUM 79
+#define MAP_HEIGHT_VOXEL_NUM 31
 #define VOXEL_RESOLUTION 0.15
 #define ANGLE_RESOLUTION 3
-#define MAX_PARTICLE_NUM_VOXEL 20
+#define MAX_PARTICLE_NUM_VOXEL 15
 #define LIMIT_MOVEMENT_IN_XY_PLANE 1
 
 #define PREDICTION_TIMES 6
 static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f, 1.f, 1.5f, 2.f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
 #define HALF_FOV_H 180  // [0, 180]. can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
-#define HALF_FOV_V 15  // [0, 60]. can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
+#define HALF_FOV_V 18  // [0, 60]. can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make HALF_FOV_H a smaller value than the real FOV angle
 
-#define DYNAMIC_CLUSTER_MAX_POINT_NUM 100 // Pre-velocity estimation parameter. Cluster with too many points will be allocated with a zero velocity.
+#define DYNAMIC_CLUSTER_MAX_POINT_NUM 150 // Pre-velocity estimation parameter. Cluster with too many points will be allocated with a zero velocity.
 #define DYNAMIC_CLUSTER_MAX_CENTER_HEIGHT 1.5 // Pre-velocity estimation parameter. Cluster with too high center will be allocated with a zero velocity.
 
 string particle_save_folder = "/home/clarence";
+
+float height_offset = 0.8f;
+
 /** END **/
 
 static const int observation_pyramid_num_h = (int)(HALF_FOV_H * 2 / ANGLE_RESOLUTION);
@@ -74,8 +77,13 @@ static const float obstacle_thickness_for_occlusion = 0.3;
 #define O_MAKE_VALID 1       // use |= operator
 #define O_MAKE_INVALID  0    // use &= operator
 
-# define M_PIf32                3.14159265358979323846        /* pi */
-# define M_PI_2f32                1.57079632679489661923        /* pi/2 */
+#ifndef M_PIf32
+#define M_PIf32                3.14159265358979323846        /* pi */
+#endif
+
+#ifndef M_PI_2f32
+#define M_PI_2f32                1.57079632679489661923        /* pi/2 */
+#endif
 
 /** Struct for an individual particle**/
 struct Particle{
@@ -190,7 +198,7 @@ public:
             return 0;
         }
 
-        cout << "sensor_px=" << sensor_px << ", sensor_quaternion_z=" << sensor_quaternion_z << ", sensor_quaternion_w=" << sensor_quaternion_w << endl;
+//        cout << "sensor_px=" << sensor_px << ", sensor_quaternion_z=" << sensor_quaternion_z << ", sensor_quaternion_w=" << sensor_quaternion_w << endl;
 
         float odom_delt_px = sensor_px - sensor_px_last;
         float odom_delt_py = sensor_py - sensor_py_last;
@@ -516,6 +524,9 @@ private:
     float half_fov_h_rad;
     float half_fov_v_rad;
 
+    float pyramid_h_angle_cos[observation_pyramid_num_h+1];
+    float pyramid_v_angle_tan[observation_pyramid_num_v+1];
+
     double total_time;
     unsigned int update_times;
 
@@ -556,10 +567,20 @@ private:
             }
         }
 
+        for(int i=0; i<=observation_pyramid_num_h; ++i){
+            pyramid_h_angle_cos[i] = cosf(i*angle_resolution_rad - half_fov_h_rad);
+        }
+
+        for(int j=0;j<=observation_pyramid_num_v; ++j)
+        {
+            pyramid_v_angle_tan[j] = tanf(j*angle_resolution_rad - half_fov_v_rad);
+        }
+
         // Find neighborhood pyramids' indexes for observation pyramids
-        for(int i=0; i< observation_pyramid_num; i++){  //Initialize point num in the storage
+        for(int i=0; i< observation_pyramid_num; ++i){  //Initialize point num in the storage
             findPyramidNeighborIndexInFOV(i, observation_pyramid_neighbors[i][0], &observation_pyramid_neighbors[i][1]);
         }
+
 
         // Generate Gaussian randoms.
         srand (static_cast <unsigned> (time(0))); //TEST
@@ -1330,11 +1351,11 @@ private:
             if(point_camera_frame_this[1] < 0.f){
                 horizontal_angle_this = -horizontal_angle_this;
             }
-            h_index = (int)((horizontal_angle_this + half_fov_h_rad) / angle_resolution_rad);
+            h_index = floor((horizontal_angle_this + half_fov_h_rad) / angle_resolution_rad);
 
             /// Calculate v_index
             float vertical_angle_this = atanf(tan_vertical_angle_this);
-            v_index = (int)((vertical_angle_this + half_fov_v_rad) / angle_resolution_rad);
+            v_index = floor((vertical_angle_this + half_fov_v_rad) / angle_resolution_rad);
 
             return 1;
         }else{
@@ -1364,15 +1385,38 @@ private:
         float cos_horizontal_angle_this = point_camera_frame_this[0] / xy_length_camera_frame;
         if(cos_horizontal_angle_this > horizontal_half_fov_cos){
             /// Calculate h_index
-            float horizontal_angle_this = acosf(cos_horizontal_angle_this);
+//            float horizontal_angle_this = acosf(cos_horizontal_angle_this);
+//            if(point_camera_frame_this[1] < 0.f){
+//                horizontal_angle_this = -horizontal_angle_this;
+//            }
+//            h_index = floor((horizontal_angle_this + half_fov_h_rad) / angle_resolution_rad);
+
             if(point_camera_frame_this[1] < 0.f){
-                horizontal_angle_this = -horizontal_angle_this;
+                for(int i=1; i<=observation_pyramid_num_h; ++i){
+                    if(cos_horizontal_angle_this <= pyramid_h_angle_cos[i]){
+                        h_index = i-1;
+                        break;
+                    }
+                }
+            }else{
+                for(int i=observation_pyramid_num_h-1; i>=0; --i){
+                    if(cos_horizontal_angle_this <= pyramid_h_angle_cos[i]){
+                        h_index = i;
+                        break;
+                    }
+                }
             }
-            h_index = (int)((horizontal_angle_this + half_fov_h_rad) / angle_resolution_rad);
 
             /// Calculate v_index
-            float vertical_angle_this = atanf(tan_vertical_angle_this);
-            v_index = (int)((vertical_angle_this + half_fov_v_rad) / angle_resolution_rad);
+//            float vertical_angle_this = atanf(tan_vertical_angle_this);
+//            v_index = floor((vertical_angle_this + half_fov_v_rad) / angle_resolution_rad);
+
+            for(int j=1; j<=observation_pyramid_num_v; ++j){
+                if(tan_vertical_angle_this <= pyramid_v_angle_tan[j]){
+                    v_index = j-1;
+                    break;
+                }
+            }
 
             return 1;
         }else{
@@ -1442,7 +1486,7 @@ private:
             transformed_p.y = p.y + current_position[1];
             transformed_p.z = p.z + current_position[2];
 
-            if(transformed_p.z > voxel_filtered_resolution){
+            if(transformed_p.z > voxel_filtered_resolution-height_offset){
                 non_ground_points->points.push_back(transformed_p);
             }else{
                 static_points->points.push_back(transformed_p);
