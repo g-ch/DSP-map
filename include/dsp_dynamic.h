@@ -35,18 +35,18 @@ Description: This is the head file for the DSP map with constant velocity model.
 using namespace std;
 
 /** Parameters for the map **/
-#define MAP_LENGTH_VOXEL_NUM 66
-#define MAP_WIDTH_VOXEL_NUM 66
-#define MAP_HEIGHT_VOXEL_NUM 40
-#define VOXEL_RESOLUTION 0.15
+#define MAP_LENGTH_VOXEL_NUM 50
+#define MAP_WIDTH_VOXEL_NUM 50
+#define MAP_HEIGHT_VOXEL_NUM 30
+#define VOXEL_RESOLUTION 0.2
 #define ANGLE_RESOLUTION 3
-#define MAX_PARTICLE_NUM_VOXEL 20
+#define MAX_PARTICLE_NUM_VOXEL 30
 #define LIMIT_MOVEMENT_IN_XY_PLANE 1
 
 #define PREDICTION_TIMES 6
 static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f, 1.f, 1.5f, 2.f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
-const int half_fov_h = 45;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
+const int half_fov_h = 42;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 
 #define DYNAMIC_CLUSTER_MAX_POINT_NUM 200 // Pre-velocity estimation parameter. Cluster with too many points will be allocated with a zero velocity.
@@ -278,7 +278,7 @@ public:
 
                 observation_num_each_pyramid[pyramid_index] += 1;
 
-                // Omit the overflowed observation points. It is suggested to used a voxel filter on the input point clouds to avoid overflow.
+                // Omit the overflowed observation points. It is suggested to used a voxel filter for the original input point clouds to avoid overflow.
                 if(observation_num_each_pyramid[pyramid_index] >= observation_max_points_num_one_pyramid){
                     observation_num_each_pyramid[pyramid_index] = observation_max_points_num_one_pyramid - 1;
                 }
@@ -402,29 +402,6 @@ public:
     }
 
 
-    void getOccupancyMapWithVelocity(int &obstacles_num, std::vector<float> &weights, pcl::PointCloud<pcl::PointNormal> &cloud, const float threshold=0.7){
-        obstacles_num = 0;
-        for(int i=0; i<voxels_total_num; i++){
-            if(voxels_objects_number[i][0] > threshold){
-                pcl::PointNormal pcl_point;
-                pcl_point.normal_x = voxels_objects_number[i][1]; //vx
-                pcl_point.normal_y = voxels_objects_number[i][2]; //vy
-                pcl_point.normal_z = voxels_objects_number[i][3]; //vz
-                getVoxelPositionFromIndex(i, pcl_point.x, pcl_point.y, pcl_point.z);
-                cloud.push_back(pcl_point);
-                weights.push_back(voxels_objects_number[i][0]);
-                ++ obstacles_num;
-            }
-
-            /// Clear weights for next prediction
-            for(int j=4; j<voxels_objects_number_dimension; ++j)
-            {
-                voxels_objects_number[i][j] = 0.f;
-            }
-        }
-    }
-
-
     void getOccupancyMapWithFutureStatus(int &obstacles_num, pcl::PointCloud<pcl::PointXYZ> &cloud, float *future_status, const float threshold=0.7){
         obstacles_num = 0;
         for(int i=0; i<voxels_total_num; i++){
@@ -450,7 +427,7 @@ public:
 
 
     ///NOTE: If you don't want to use any visualization functions like "getOccupancyMap"
-    ///      or "getOccupancyMapWithVelocity", you must call this function after update process.
+    ///      or "getOccupancyMapWithFutureStatus", you must call this function after the update step.
     void clearOccupancyMapPrediction(){
         for(int i=0; i<voxels_total_num; i++){
             for(int j=4; j<voxels_objects_number_dimension; ++j)
@@ -1080,7 +1057,7 @@ private:
     }
 
 
-private: /*** Some specific functions ***/
+private:
 
     int getParticleVoxelsIndex(const Particle &p, int &index){
         if(ifParticleIsOut(p)){return 0;}

@@ -19,7 +19,7 @@ Description: This is a ROS example to use the DSP map. The map object is my_map 
 
 
 #include "ros/ros.h"
-#include "dsp_dynamic.h" // You can change the head file to dsp_dynamic_multiple_neighbors.h or dsp_static.h to use different map types. For more information, please read the readme file.
+#include "dsp_dynamic.h" // You can change the head file to "dsp_dynamic_multiple_neighbors.h" or "dsp_static.h" to use different map types. For more information, please refer to the readme file.
 #include <pcl/common/transforms.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/point_types.h>
@@ -239,9 +239,9 @@ void colorAssign(int &r, int &g, int &b, float v, float value_min=0.f, float val
             g = nkey;
             b = 255;
             break;
-        case 4:
+        case 4: // Sky blue
             r = 0;
-            g = 0;
+            g = 255;
             b = 255;
             break;
         default: // White
@@ -376,7 +376,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
      * future_status[*][0] is current status considering delay compensation.
     **/
 
-    my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.2); //0.25
+    my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.5);
 
     /// Publish Point cloud and center position
     pcl::toROSMsg(cloud_to_publish, cloud_to_pub_transformed);

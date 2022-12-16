@@ -35,10 +35,10 @@ Description: This is the head file for the DSP map with static model. The curren
 using namespace std;
 
 /** Parameters for the map **/
-#define MAP_LENGTH_VOXEL_NUM 66
-#define MAP_WIDTH_VOXEL_NUM 66
-#define MAP_HEIGHT_VOXEL_NUM 40
-#define VOXEL_RESOLUTION 0.15
+#define MAP_LENGTH_VOXEL_NUM 50
+#define MAP_WIDTH_VOXEL_NUM 50
+#define MAP_HEIGHT_VOXEL_NUM 30
+#define VOXEL_RESOLUTION 0.2
 #define ANGLE_RESOLUTION 3
 #define MAX_PARTICLE_NUM_VOXEL 10
 
@@ -46,7 +46,7 @@ using namespace std;
 #define PREDICTION_TIMES 1
 static const float prediction_future_time[PREDICTION_TIMES] = {0.05f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
-const int half_fov_h = 45;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
+const int half_fov_h = 42;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 
 string particle_save_folder = "/home/clarence";
@@ -240,7 +240,7 @@ public:
             float rotated_point_this[3];
             rotateVectorByQuaternion(&point_cloud_ptr[iter_num], sensor_rotation_quaternion, rotated_point_this);
 
-            // Store in pyramids for update
+            // Store point cloud in the pyramids for the update step
             if(ifInPyramidsArea(rotated_point_this[0], rotated_point_this[1], rotated_point_this[2]))
             {
                 // Store in pcl point cloud for velocity estimation of new born particles
@@ -272,7 +272,7 @@ public:
 
                 observation_num_each_pyramid[pyramid_index] += 1;
 
-                // Omit the overflowed observation points. It is suggested to used a voxel filter on the input point clouds to avoid overflow.
+                // Omit the overflowed observation points. It is suggested to used a voxel filter for the original input point clouds to avoid overflow.
                 if(observation_num_each_pyramid[pyramid_index] >= observation_max_points_num_one_pyramid){
                     observation_num_each_pyramid[pyramid_index] = observation_max_points_num_one_pyramid - 1;
                 }
@@ -399,29 +399,6 @@ public:
     }
 
 
-    void getOccupancyMapWithVelocity(int &obstacles_num, std::vector<float> &weights, pcl::PointCloud<pcl::PointNormal> &cloud, const float threshold=0.7){
-        obstacles_num = 0;
-        for(int i=0; i<voxels_total_num; i++){
-            if(voxels_objects_number[i][0] > threshold){
-                pcl::PointNormal pcl_point;
-                pcl_point.normal_x = voxels_objects_number[i][1]; //vx
-                pcl_point.normal_y = voxels_objects_number[i][2]; //vy
-                pcl_point.normal_z = voxels_objects_number[i][3]; //vz
-                getVoxelPositionFromIndex(i, pcl_point.x, pcl_point.y, pcl_point.z);
-                cloud.push_back(pcl_point);
-                weights.push_back(voxels_objects_number[i][0]);
-                ++ obstacles_num;
-            }
-
-            /// Clear weights for next prediction
-            for(int j=4; j<voxels_objects_number_dimension; ++j)
-            {
-                voxels_objects_number[i][j] = 0.f;
-            }
-        }
-    }
-
-
     void getOccupancyMapWithFutureStatus(int &obstacles_num, pcl::PointCloud<pcl::PointXYZ> &cloud, float *future_status, const float threshold=0.7){
         obstacles_num = 0;
         for(int i=0; i<voxels_total_num; i++){
@@ -447,7 +424,7 @@ public:
 
 
     ///NOTE: If you don't want to use any visualization functions like "getOccupancyMap"
-    ///      or "getOccupancyMapWithVelocity", you must call this function after update process.
+    ///      or "getOccupancyMapWithFutureStatus", you must call this function after the update step.
     void clearOccupancyMapPrediction(){
         for(int i=0; i<voxels_total_num; i++){
             for(int j=4; j<voxels_objects_number_dimension; ++j)
@@ -660,17 +637,13 @@ private:
                     voxels_with_particle[v_index][p][0] = 1.f; // If valid, remove resample flag.
                     ++ operation_counter;
 
-                    if(fabs(voxels_with_particle[v_index][p][1]*voxels_with_particle[v_index][p][2]*voxels_with_particle[v_index][p][3]) < 1e-6){
-                        // keep small, for static obstacles
-                    }else{
-                        voxels_with_particle[v_index][p][1] = 0.f;  //vx
-                        voxels_with_particle[v_index][p][2] = 0.f;  //vy
-                        voxels_with_particle[v_index][p][3] = 0.f;  //vz
-                    }
+                    voxels_with_particle[v_index][p][1] = 0.f;  //vx
+                    voxels_with_particle[v_index][p][2] = 0.f;  //vy
+                    voxels_with_particle[v_index][p][3] = 0.f;  //vz
 
-                    voxels_with_particle[v_index][p][4] += delt_t*voxels_with_particle[v_index][p][1] + odom_delt_px;  //px
-                    voxels_with_particle[v_index][p][5] += delt_t*voxels_with_particle[v_index][p][2] + odom_delt_py;  //py
-                    voxels_with_particle[v_index][p][6] += delt_t*voxels_with_particle[v_index][p][3] + odom_delt_pz;  //pz
+                    voxels_with_particle[v_index][p][4] += odom_delt_px;  //px
+                    voxels_with_particle[v_index][p][5] += odom_delt_py;  //py
+                    voxels_with_particle[v_index][p][6] += odom_delt_pz;  //pz
 
                     int particle_voxel_index_new;
                     if(getParticleVoxelsIndex(voxels_with_particle[v_index][p][4], voxels_with_particle[v_index][p][5],
@@ -728,8 +701,6 @@ private:
                         if(pyramids_in_fov[pyramid_check_index][particle_seq][0] & O_MAKE_VALID){  //Check only valid particles
                             int particle_voxel_index = pyramids_in_fov[pyramid_check_index][particle_seq][1];
                             int particle_voxel_inner_index = pyramids_in_fov[pyramid_check_index][particle_seq][2];
-
-//                            cout<<"pyramid_check_index="<<pyramid_check_index<<", particle_v_inner_index="<<particle_v_inner_index<<", point_cloud[i][j][0]="<<point_cloud[i][j][0]<<endl;
 
                             float gk = queryNormalPDF(
                                     voxels_with_particle[particle_voxel_index][particle_voxel_inner_index][4],
@@ -829,35 +800,6 @@ public:
             p_corrected.x = point.x - current_position[0];
             p_corrected.y = point.y - current_position[1];
             p_corrected.z = point.z - current_position[2];
-
-            int point_voxel_index;
-            float static_particle_weight_sum = 0.f;
-            float dynamic_particle_weight_sum = 0.f;
-            float static_or_dynamic_weight_sum = 0.f;
-
-            /// TODO: Improve efficiency in this weight summation calculation procedure
-            if(getParticleVoxelsIndex(p_corrected.x, p_corrected.y, p_corrected.z, point_voxel_index)){
-                //This condition should always be true because the point cloud outside of the map should be omitted in the first place. Just an insurance.
-                for(int kk=0; kk<SAFE_PARTICLE_NUM_VOXEL; ++kk){
-                    if(voxels_with_particle[point_voxel_index][kk][0] > 0.9f && voxels_with_particle[point_voxel_index][kk][0] < 14.f){ //not new born
-                        float v_abs = fabs(voxels_with_particle[point_voxel_index][kk][1]) + fabs(voxels_with_particle[point_voxel_index][kk][2]) + fabs(voxels_with_particle[point_voxel_index][kk][3]);
-                        if(v_abs < 0.1f){
-                            // Static
-                            static_particle_weight_sum += voxels_with_particle[point_voxel_index][kk][7];
-                        }else if(v_abs < 0.5f){
-                            // Static or dynamic
-                            static_or_dynamic_weight_sum += voxels_with_particle[point_voxel_index][kk][7];
-                        }
-                        else{
-                            //Dynamic
-                            dynamic_particle_weight_sum += voxels_with_particle[point_voxel_index][kk][7];
-                        }
-                    }
-                }
-            }
-            else{
-                continue;
-            }
 
             for(int p=0; p<new_born_particle_number_each_point; p++){
                 std::shared_ptr<Particle> particle_ptr{new Particle};
@@ -1023,7 +965,7 @@ private:
     }
 
 
-private: /*** Some specific functions ***/
+private:
 
     int getParticleVoxelsIndex(const Particle &p, int &index){
         if(ifParticleIsOut(p)){return 0;}
@@ -1346,10 +1288,6 @@ private: /*** Some specific functions ***/
         if( cloud_in_current_view_rotated->points.empty()) return;
 
         input_cloud_with_velocity->clear();
-
-        /// Remove ground and transform data
-        pcl::PointCloud<pcl::PointXYZ>::Ptr ground_points(new pcl::PointCloud<pcl::PointXYZ>());
-        pcl::PointCloud<pcl::PointXYZ>::Ptr non_ground_points(new pcl::PointCloud<pcl::PointXYZ>());
 
         for(auto &p : cloud_in_current_view_rotated->points){
             pcl::PointXYZ transformed_p;
