@@ -49,7 +49,7 @@ static const float prediction_future_time[PREDICTION_TIMES] = {0.05f}; //unit: s
 const int half_fov_h = 42;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 
-string particle_save_folder = "/home/clarence";
+string particle_save_folder = ".";
 /** END **/
 
 

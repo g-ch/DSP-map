@@ -3,14 +3,13 @@ This repository contains the head files of the Dual-Structure Particle-based (DS
 and a ROS node example to use this map. For more information about the DSP map, see [video](https://www.youtube.com/watch?v=seF_Oy4YbXo&t=5s) and [preprint](https://arxiv.org/abs/2202.06273).
 
 There are three __head files__ in the `include` folder.
-1. ``dsp_dynamic.h`` is the head file for the DSP map with a constant velocity model. (Recommended for Type II dynamic occupancy map.)
+1. ``dsp_dynamic.h`` is the head file for the DSP map with a constant velocity model (called DSP-Dynamic map in our paper). (__Recommended__ for Type II dynamic occupancy map.)
 2. ``dsp_dynamic_multiple_neighbors.h`` is the head file for the DSP map with a constant velocity model. Check the Supplementary section below to know the difference between `dsp_dynamic` and `dsp_dynamic_multiple_neighbors`.
-3. ``dsp_static.h`` is the head file for the DSP map with the static model. (Type I dynamic occupancy map.)
+3. ``dsp_static.h`` is the head file for the DSP map with the static model (called DSP-Static map in our paper). (Type I dynamic occupancy map.)
 
 Just include one of the head files in your source file and use the map. We write everything in a single head!
 
 A ROS __node example__ `map_sim_example.cpp` can be found in the `src` folder. In the example, we subscribe point cloud from topic `/camera_front/depth/points` and pose from `/mavros/local_position/pose` to build the map. We publish the current occupancy status with topic `/my_map/cloud_ob` and one layer of the predicted future occupancy maps with topic `/my_map/future_status` in the point cloud form.
-
 
 # Compile
 __Tested environment__: Ubuntu 18.04 + ROS Melodic and Ubuntu 20.04 + ROS Noetic
@@ -49,13 +48,47 @@ source devel/setup.bash
 roslaunch dynamic_occpuancy_map mapping.launch
 ```
 
-The launch file will start the example mapping node and open three rviz windows to show the current occupancy status (3D), predicted future occupancy status (2D, layer of a height set in `map_sim_example.cpp`), and the raw point cloud from the camera.
+The launch file will start the example mapping node and open three RVIZ windows to show the current occupancy status (3D), predicted future occupancy status (2D, layer of a height set in `map_sim_example.cpp`), and the raw point cloud from the camera.
+
+<img src="data/example.png"/>
 
 # Parameters
-There are quite a few parameters in this map. But only `Camera FOV` is coupled with hardware and should be modified according to the real FOV of your camera.
+There are quite a few parameters in this map. Below we provide two ways to set the parameters.
+
+__NOTE:__ Only Parameter `Camera FOV`, including a horizontal angle and a vertical angle of the FOV, is coupled with hardware and should be set according to the real FOV of your camera.
 You can use default values for other parameters.
 
-## Static parameters
+## Set Parameters with a Tool
+Some of the parameters are hard to understand if you are not very familiar with the DSP map. We provide a "Parameter Tuner" tool to set the parameters in the DSP-Dynamic map in an easily-understood way. To use the tool, open the `script` folder and run 
+
+```
+python set_map_parameters.py
+```
+You will see the following UI.
+
+<img src="data/ParameterTuner.png"/>
+
+The meaning of parameters in the UI are:
+
+1. _Map Resolution_ controls the size of the voxel subspace in the map. The voxel subspace is used to voxelize the map for visulaization and usage in voxel-based motion planners. Changing this parameter will change voxel resolution. (When _Map Resolution_ is changed, the tool will also change the occupancy threshold in `map_sim_example.cpp` to a nice value automatically.) 
+
+2. _Map Length/Width/Height_ control the size of the map. The mapping process gets slower when the size gets larger.
+   
+3. _Performance/Efficiency_ control the performance level and efficiency level of the map, respectively. Improving the performance will lower the efficiency.
+
+4. _FOV Horizontal/Vertical Angle_ describe the FOV range of the camera. Set the parameters according to the real FOV size of your depth camera. Since the depth points close to the edge of the FOV are usually very noisy, the tool will clip the FOV size a little bit after the parameters are saved.
+
+5. _(Optional) Max cluster point number / center height_ are parameters in the initial velocity estimator. The initial velocity estimator clusters the input point cloud. The cluster whose size is larger than `Max cluster point number` or center height is larger than `Max cluster enter height` will be regarded as a cluster representing static obstacles.
+
+Press the `Save` button to save parameters. Some parameters in `map_sim_example.cpp` and `dsp_dynamic.h` will be changed accordingly. Then you need to recompile the code with `catkin_make`.
+
+Press the `Reset to default` button to show the default parameters. Then press the `Save` button to use the default parameters.
+
+
+## Set Parameters in the Code Directly
+You can also modify the parameters in the code directly. For DSP-Static map and DSP-Dynamic map using multiple neighbors, you can only use this way currently.
+
+### Static parameters
 The following parameters can be found at the top of the map head file.
 1. Camera FOV. It is necessary to set the camera FOV angle for your camera. The unit is degree and we set the half-angle value.
     ```
@@ -85,7 +118,7 @@ The following parameters can be found at the top of the map head file.
     static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f, 1.f, 1.5f, 2.f}; //unit: second
     ```
 
-## Dynamic parameters
+### Dynamic parameters
 The following parameters can be changed dynamically in the node.
 ```
 my_map.setPredictionVariance(0.05, 0.05); // StdDev for prediction. velocity StdDev, position StdDev, respectively.

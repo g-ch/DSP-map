@@ -35,24 +35,24 @@ Description: This is the head file for the DSP map with constant velocity model.
 using namespace std;
 
 /** Parameters for the map **/
-#define MAP_LENGTH_VOXEL_NUM 50
-#define MAP_WIDTH_VOXEL_NUM 50
-#define MAP_HEIGHT_VOXEL_NUM 30
-#define VOXEL_RESOLUTION 0.2
+#define MAP_LENGTH_VOXEL_NUM 66
+#define MAP_WIDTH_VOXEL_NUM 66
+#define MAP_HEIGHT_VOXEL_NUM 40
+#define VOXEL_RESOLUTION 0.15
 #define ANGLE_RESOLUTION 3
-#define MAX_PARTICLE_NUM_VOXEL 30
+#define MAX_PARTICLE_NUM_VOXEL 9
 #define LIMIT_MOVEMENT_IN_XY_PLANE 1
 
 #define PREDICTION_TIMES 6
 static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f, 1.f, 1.5f, 2.f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
-const int half_fov_h = 42;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
-const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
+const int half_fov_h = 42;
+const int half_fov_v = 24;
 
-#define DYNAMIC_CLUSTER_MAX_POINT_NUM 200 // Pre-velocity estimation parameter. Cluster with too many points will be allocated with a zero velocity.
-#define DYNAMIC_CLUSTER_MAX_CENTER_HEIGHT 1.5 // Pre-velocity estimation parameter. Cluster with too high center will be allocated with a zero velocity.
+#define DYNAMIC_CLUSTER_MAX_POINT_NUM 200
+#define DYNAMIC_CLUSTER_MAX_CENTER_HEIGHT 1.5
 
-string particle_save_folder = "/home/clarence";
+string particle_save_folder = ".";
 /** END **/
 
 static const int observation_pyramid_num_h = (int)half_fov_h * 2 / ANGLE_RESOLUTION;

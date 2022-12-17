@@ -37,8 +37,7 @@ Description: This is a ROS example to use the DSP map. The map object is my_map 
 
 /// Define a map object
 DSPMap my_map;
-const float res = 0.1;  // Smaller res will get better tracking result but is slower.
-
+const float res = 0.1;
 /// Set global variables
 queue<double> pose_att_time_queue;
 queue<Eigen::Vector3d> uav_position_global_queue;
@@ -376,7 +375,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
      * future_status[*][0] is current status considering delay compensation.
     **/
 
-    my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.5);
+      my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.2);
 
     /// Publish Point cloud and center position
     pcl::toROSMsg(cloud_to_publish, cloud_to_pub_transformed);

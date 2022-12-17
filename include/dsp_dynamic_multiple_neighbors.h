@@ -50,10 +50,10 @@ static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f
 const int half_fov_h = 42;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 
-#define DYNAMIC_CLUSTER_MAX_POINT_NUM 200 // Pre-velocity estimation parameter. Cluster with too many points will be allocated with a zero velocity.
-#define DYNAMIC_CLUSTER_MAX_CENTER_HEIGHT 1.5 // Pre-velocity estimation parameter. Cluster with too high center will be allocated with a zero velocity.
+#define DYNAMIC_CLUSTER_MAX_POINT_NUM 200// Pre-velocity estimation parameter. Cluster with too many points will be allocated with a zero velocity.
+#define DYNAMIC_CLUSTER_MAX_CENTER_HEIGHT 1.5// Pre-velocity estimation parameter. Cluster with too high center will be allocated with a zero velocity.
 
-string particle_save_folder = "/home/clarence";
+string particle_save_folder = ".";
 /** END **/
 
 
