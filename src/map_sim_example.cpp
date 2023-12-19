@@ -34,10 +34,14 @@ Description: This is a ROS example to use the DSP map. The map object is my_map 
 #include <queue>
 #include "nav_msgs/Odometry.h"
 #include "std_msgs/Float64.h"
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <ros/package.h>
+#include <yaml-cpp/yaml.h>
 
 /// Define a map object
 DSPMap my_map;
-const float res = 0.1;
+const float res = 0.15;
 /// Set global variables
 queue<double> pose_att_time_queue;
 queue<Eigen::Vector3d> uav_position_global_queue;
@@ -45,7 +49,9 @@ queue<Eigen::Quaternionf> uav_att_global_queue;
 Eigen::Vector3d uav_position_global;
 Eigen::Quaternionf uav_att_global;
 
-const unsigned int MAX_POINT_NUM = 5000; // Estimated max point cloud number after down sample. To define the vector below.
+float occupancy_threshold = 0.3f; // Occupancy threshold
+
+const unsigned int MAX_POINT_NUM = 40000; // Estimated max point cloud number after down sample. To define the vector below.
 float point_clouds[MAX_POINT_NUM*3]; // Container for point cloud. We use naive vector for efficiency purpose.
 
 // The following range parameters are calculated with map parameters to remove the point cloud outside of the map range.
@@ -255,52 +261,54 @@ void colorAssign(int &r, int &g, int &b, float v, float value_min=0.f, float val
  * Summary: This is the main callback to update map.
  */
 pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered(new pcl::PointCloud<pcl::PointXYZ>());
-void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
+void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud, const geometry_msgs::PoseStampedConstPtr& pose)
 {
     /// Simple synchronizer for point cloud data and pose
-    Eigen::Vector3d uav_position = uav_position_global;
-    Eigen::Quaternionf uav_att = uav_att_global;
+    Eigen::Vector3d uav_position(pose->pose.position.x, pose->pose.position.y, pose->pose.position.z);
+    Eigen::Quaternionf uav_att(pose->pose.orientation.w, pose->pose.orientation.x, pose->pose.orientation.y, pose->pose.orientation.z);
 
-    static Eigen::Quaternionf quad_last_popped(-10.f, -10.f, -10.f, -10.f);
-    static Eigen::Vector3d position_last_popped(-10000.f, -10000.f, -10000.f);
-    static double last_popped_time = 0.0;
+    std::cout << "uav_position="<<uav_position.x() <<", "<<uav_position.y()<<", "<<uav_position.z()<<endl;
 
-    ros::Rate loop_rate(500);
-    while(state_locked){
-        loop_rate.sleep();
-        ros::spinOnce();
-    }
-    state_locked = true;
+    // static Eigen::Quaternionf quad_last_popped(-10.f, -10.f, -10.f, -10.f);
+    // static Eigen::Vector3d position_last_popped(-10000.f, -10000.f, -10000.f);
+    // static double last_popped_time = 0.0;
 
-    while(!pose_att_time_queue.empty()){   //Synchronize pose by queue
-        double time_stamp_pose = pose_att_time_queue.front();
-        if(time_stamp_pose >= cloud->header.stamp.toSec()){
-            uav_att = uav_att_global_queue.front();
-            uav_position = uav_position_global_queue.front();
+    // ros::Rate loop_rate(500);
+    // while(state_locked){
+    //     loop_rate.sleep();
+    //     ros::spinOnce();
+    // }
+    // state_locked = true;
 
-            // linear interpolation
-            if(quad_last_popped.x() >= -1.f){
-                double time_interval_from_last_time = time_stamp_pose - last_popped_time;
-                double time_interval_cloud = cloud->header.stamp.toSec() - last_popped_time;
-                double factor = time_interval_cloud / time_interval_from_last_time;
-                uav_att = quad_last_popped.slerp(factor, uav_att);
-                uav_position = position_last_popped * (1.0 - factor) + uav_position*factor;
-            }
+    // while(!pose_att_time_queue.empty()){   //Synchronize pose by queue
+    //     double time_stamp_pose = pose_att_time_queue.front();
+    //     if(time_stamp_pose >= cloud->header.stamp.toSec()){
+    //         uav_att = uav_att_global_queue.front();
+    //         uav_position = uav_position_global_queue.front();
 
-            ROS_INFO_THROTTLE(3.0, "cloud mismatch time = %lf", cloud->header.stamp.toSec() - time_stamp_pose);
+    //         // linear interpolation
+    //         if(quad_last_popped.x() >= -1.f){
+    //             double time_interval_from_last_time = time_stamp_pose - last_popped_time;
+    //             double time_interval_cloud = cloud->header.stamp.toSec() - last_popped_time;
+    //             double factor = time_interval_cloud / time_interval_from_last_time;
+    //             uav_att = quad_last_popped.slerp(factor, uav_att);
+    //             uav_position = position_last_popped * (1.0 - factor) + uav_position*factor;
+    //         }
 
-            break;
-        }
+    //         ROS_INFO_THROTTLE(3.0, "cloud mismatch time = %lf", cloud->header.stamp.toSec() - time_stamp_pose);
 
-        quad_last_popped = uav_att_global_queue.front();
-        position_last_popped = uav_position_global_queue.front();
-        last_popped_time = time_stamp_pose;
+    //         break;
+    //     }
 
-        pose_att_time_queue.pop();
-        uav_att_global_queue.pop();
-        uav_position_global_queue.pop();
-    }
-    state_locked = false;
+    //     quad_last_popped = uav_att_global_queue.front();
+    //     position_last_popped = uav_position_global_queue.front();
+    //     last_popped_time = time_stamp_pose;
+
+    //     pose_att_time_queue.pop();
+    //     uav_att_global_queue.pop();
+    //     uav_position_global_queue.pop();
+    // }
+    // state_locked = false;
 
 
     /// Point cloud preprocess
@@ -322,6 +330,10 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
         float y = -cloud_filtered->points.at(i).x;
         float z = -cloud_filtered->points.at(i).y;
 
+        // float x = cloud_filtered->points.at(i).x;
+        // float y = cloud_filtered->points.at(i).y;
+        // float z = cloud_filtered->points.at(i).z;
+
         if(inRange(x_min, x_max, x) && inRange(y_min, y_max, y) && inRange(z_min, z_max, z))
         {
             point_clouds[useful_point_num*3] = x;
@@ -335,16 +347,26 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
         }
     }
 
+    std::cout << "useful_point_num="<<useful_point_num <<endl;
+
     /// Update map
     clock_t start1, finish1;
     start1 = clock();
 
-    std::cout << "uav_position="<<uav_position.x() <<", "<<uav_position.y()<<", "<<uav_position.z()<<endl;
+    // std::cout << "uav_position="<<uav_position.x() <<", "<<uav_position.y()<<", "<<uav_position.z()<<endl;
+
+    Eigen::Vector3d uav_position_local;
+    uav_position_local << uav_position.z(), -uav_position.x(), -uav_position.y();
+    Eigen::Quaternionf uav_att_local;
+    uav_att_local.w() = uav_att.w();
+    uav_att_local.x() = uav_att.z();
+    uav_att_local.y() = -uav_att.x();
+    uav_att_local.z() = -uav_att.y();
 
     // This is the core function we use
     if(!my_map.update(useful_point_num, 3, point_clouds,
-                  uav_position.x(), uav_position.y(), uav_position.z(), data_time_stamp,
-                  uav_att.w(), uav_att.x(), uav_att.y(), uav_att.z())){
+                  uav_position_local.x(), uav_position_local.y(), uav_position_local.z(), data_time_stamp,
+                  uav_att_local.w(), uav_att_local.x(), uav_att_local.y(), uav_att_local.z())){
         return;
     }
 
@@ -367,7 +389,7 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
 
     int occupied_num=0;
     pcl::PointCloud<pcl::PointXYZ> cloud_to_publish;
-    sensor_msgs::PointCloud2 cloud_to_pub_transformed;
+    sensor_msgs::PointCloud2 cloud_to_pub_transformed_msg;
     static float future_status[VOXEL_NUM][PREDICTION_TIMES];
     /** Note: The future status is stored with voxel structure.
      * The voxels are indexed with one dimension.
@@ -375,16 +397,26 @@ void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud)
      * future_status[*][0] is current status considering delay compensation.
     **/
 
-      my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], 0.2);
+      my_map.getOccupancyMapWithFutureStatus(occupied_num, cloud_to_publish, &future_status[0][0], occupancy_threshold);
+
+
+    pcl::PointCloud<pcl::PointXYZ> cloud_to_publish_transformed;
+    for(int i=0; i<cloud_to_publish.size(); ++i){
+        pcl::PointXYZ p;
+        p.x = -cloud_to_publish.points.at(i).y + pose->pose.position.x;
+        p.y = -cloud_to_publish.points.at(i).z + pose->pose.position.y;
+        p.z = cloud_to_publish.points.at(i).x + pose->pose.position.z;
+        cloud_to_publish_transformed.push_back(p);
+    }
 
     /// Publish Point cloud and center position
-    pcl::toROSMsg(cloud_to_publish, cloud_to_pub_transformed);
-    cloud_to_pub_transformed.header.frame_id = "map";
-    cloud_to_pub_transformed.header.stamp = cloud->header.stamp;
-    cloud_pub.publish(cloud_to_pub_transformed);
+    pcl::toROSMsg(cloud_to_publish_transformed, cloud_to_pub_transformed_msg);
+    cloud_to_pub_transformed_msg.header.frame_id = "map";
+    cloud_to_pub_transformed_msg.header.stamp = cloud->header.stamp;
+    cloud_pub.publish(cloud_to_pub_transformed_msg);
 
     geometry_msgs::PoseStamped map_pose;
-    map_pose.header.stamp = cloud_to_pub_transformed.header.stamp;
+    map_pose.header.stamp = cloud_to_pub_transformed_msg.header.stamp;
     map_pose.pose.position.x = uav_position.x();
     map_pose.pose.position.y = uav_position.y();
     map_pose.pose.position.z = uav_position.z();
@@ -480,37 +512,37 @@ void simObjectStateCallback(const gazebo_msgs::ModelStates &msg)
 /***
  * Summary: Ros callback function to get pose of the drone (camera) to update map.
  */
-void simPoseCallback(const geometry_msgs::PoseStamped &msg)
-{
-    if(!state_locked)
-    {
-        state_locked = true;
-        uav_position_global.x() = msg.pose.position.x;
-        uav_position_global.y() = msg.pose.position.y;
-        uav_position_global.z() = msg.pose.position.z;
+// void simPoseCallback(const geometry_msgs::PoseStamped &msg)
+// {
+//     if(!state_locked)
+//     {
+//         state_locked = true;
+//         uav_position_global.x() = msg.pose.position.x;
+//         uav_position_global.y() = msg.pose.position.y;
+//         uav_position_global.z() = msg.pose.position.z;
 
-        uav_att_global.x() = msg.pose.orientation.x;
-        uav_att_global.y() = msg.pose.orientation.y;
-        uav_att_global.z() = msg.pose.orientation.z;
-        uav_att_global.w() = msg.pose.orientation.w;
+//         uav_att_global.x() = msg.pose.orientation.x;
+//         uav_att_global.y() = msg.pose.orientation.y;
+//         uav_att_global.z() = msg.pose.orientation.z;
+//         uav_att_global.w() = msg.pose.orientation.w;
 
-        uav_position_global_queue.push(uav_position_global);
-        uav_att_global_queue.push(uav_att_global);
-        pose_att_time_queue.push(msg.header.stamp.toSec());
-        ROS_INFO("Pose updated");
-    }
+//         uav_position_global_queue.push(uav_position_global);
+//         uav_att_global_queue.push(uav_att_global);
+//         pose_att_time_queue.push(msg.header.stamp.toSec());
+//         ROS_INFO("Pose updated");
+//     }
 
-    state_locked = false;
+//     state_locked = false;
 
-    Eigen::Quaternionf axis; //= quad * q1 * quad.inverse();
-    axis.w() = cos(-M_PI/4.0);
-    axis.x() = 0.0;
-    axis.y() = 0.0;
-    axis.z() = sin(-M_PI/4.0);
-    Eigen::Quaternionf rotated_att = uav_att_global * axis;
+//     Eigen::Quaternionf axis; //= quad * q1 * quad.inverse();
+//     axis.w() = cos(-M_PI/4.0);
+//     axis.x() = 0.0;
+//     axis.y() = 0.0;
+//     axis.z() = sin(-M_PI/4.0);
+//     Eigen::Quaternionf rotated_att = uav_att_global * axis;
 
-    showFOV(uav_position_global, rotated_att, 90.0 / 180.0 * M_PI, 54.0 / 180.0 * M_PI , 5);
-}
+//     showFOV(uav_position_global, rotated_att, 90.0 / 180.0 * M_PI, 54.0 / 180.0 * M_PI , 5);
+// }
 
 
 int main(int argc, char **argv)
@@ -526,17 +558,42 @@ int main(int argc, char **argv)
     DSPMap::setOriginalVoxelFilterResolution(res); // Resolution of the voxel filter used for point cloud pre-process.
 
     my_map.setParticleRecordFlag(0, 19.0); // Set the first parameter to 1 to save particles at a time: e.g. 19.0s. Saving will take a long time. Don't use it in realtime applications.
+    
+    float noise_number = 0.0001;
 
+    // Read yaml file
+    std::string package_path = ros::package::getPath("dynamic_occpuancy_map");
+    std::string yaml_path = package_path + "/cfg/options.yaml";
+
+    YAML::Node config = YAML::LoadFile(yaml_path);
+    bool if_consider_depth_noise = config["if_consider_depth_noise"].as<bool>();
+    if(if_consider_depth_noise){
+        noise_number = config["noise_number"].as<float>();
+    }
+    occupancy_threshold = config["occupancy_threshold"].as<float>();
+
+    std::cout << "if_consider_depth_noise="<<if_consider_depth_noise <<endl;
+    std::cout << "noise_number="<<noise_number <<endl;
+    std::cout << "occupancy_threshold="<<occupancy_threshold <<endl;
+
+    my_map.setKappa(noise_number);
 
     /// Gazebo pedestrain's pose. Just for visualization
     ros::Subscriber object_states_sub = n.subscribe("/gazebo/model_states", 1, simObjectStateCallback);
 
     /// Input data for the map
-    ros::Subscriber point_cloud_sub = n.subscribe("/camera_front/depth/points", 1, cloudCallback);
-    ros::Subscriber pose_sub = n.subscribe("/mavros/local_position/pose", 1, simPoseCallback);
+    // ros::Subscriber point_cloud_sub = n.subscribe("/raw_point_cloud", 1, cloudCallback);
+    // ros::Subscriber pose_sub = n.subscribe("/camera_pose", 1, simPoseCallback);
+
+    /// Define a synchread to synchronize pose and point cloud
+    message_filters::Subscriber<sensor_msgs::PointCloud2> point_cloud_sub_sync(n, "/raw_point_cloud", 1);
+    message_filters::Subscriber<geometry_msgs::PoseStamped> pose_sub_sync(n, "/camera_pose", 1);
+    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::PointCloud2, geometry_msgs::PoseStamped> MySyncPolicy;
+    message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), point_cloud_sub_sync, pose_sub_sync);
+    sync.registerCallback(boost::bind(&cloudCallback, _1, _2));
 
     /// Visualization topics
-    cloud_pub = n.advertise<sensor_msgs::PointCloud2>("/my_map/cloud_ob", 1, true);
+    cloud_pub = n.advertise<sensor_msgs::PointCloud2>("/occupied_point", 1, true);
     map_center_pub = n.advertise<geometry_msgs::PoseStamped>("/my_map/map_center", 1, true);
     gazebo_model_states_pub = n.advertise<gazebo_msgs::ModelStates>("/my_map/model_states", 1, true);
 

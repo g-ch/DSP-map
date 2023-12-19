@@ -1,0 +1,3 @@
+if_consider_depth_noise: 'true'
+noise_number: 10.0
+occupancy_threshold: 0.2

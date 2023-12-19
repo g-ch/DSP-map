@@ -35,19 +35,19 @@ Description: This is the head file for the DSP map with static model. The curren
 using namespace std;
 
 /** Parameters for the map **/
-#define MAP_LENGTH_VOXEL_NUM 50
-#define MAP_WIDTH_VOXEL_NUM 50
-#define MAP_HEIGHT_VOXEL_NUM 30
+#define MAP_LENGTH_VOXEL_NUM 256
+#define MAP_WIDTH_VOXEL_NUM 256
+#define MAP_HEIGHT_VOXEL_NUM 128
 #define VOXEL_RESOLUTION 0.2
-#define ANGLE_RESOLUTION 3
-#define MAX_PARTICLE_NUM_VOXEL 10
+#define ANGLE_RESOLUTION 1
+#define MAX_PARTICLE_NUM_VOXEL 2
 
 /// Note: Prediction is meaningless when using a static model! But we still leave the interface so you can directly switch between dsp_dynamic and dsp_static by using a different head file.
 #define PREDICTION_TIMES 1
 static const float prediction_future_time[PREDICTION_TIMES] = {0.05f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
-const int half_fov_h = 42;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
-const int half_fov_v = 27;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
+const int half_fov_h = 40;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
+const int half_fov_v = 14;  // can be divided by ANGLE_RESOLUTION. If not, modify ANGLE_RESOLUTION or make half_fov_h a smaller value than the real FOV angle
 
 string particle_save_folder = ".";
 /** END **/
@@ -66,13 +66,13 @@ static const int SAFE_PARTICLE_NUM_PYRAMID = SAFE_PARTICLE_NUM/PYRAMID_NUM * 2;
 //An estimated number. If the observation points are too dense (over 100 points in one pyramid), the overflowed points will be ignored. It is suggested to use a voxel filter to the original point cloud.
 static const int observation_max_points_num_one_pyramid = 100;
 
-#define GAUSSIAN_RANDOMS_NUM 10000000
+#define GAUSSIAN_RANDOMS_NUM 1000000
 
 #define O_MAKE_VALID 1       // use |= operator
 #define O_MAKE_INVALID  0    // use &= operator
 
-# define M_PIf32                3.14159265358979323846        /* pi */
-# define M_PI_2f32                1.57079632679489661923        /* pi/2 */
+// #define M_PIf32                3.14159265358979323846        /* pi */
+// #define M_PI_2f32                1.57079632679489661923        /* pi/2 */
 
 using namespace std;
 
@@ -192,7 +192,9 @@ public:
         float odom_delt_pz = sensor_pz - sensor_pz_last;
         auto delt_t = (float)(time_stamp_second - time_stamp_second_last);
 
-        if(fabs(odom_delt_px) > 10.f || fabs(odom_delt_py) > 10.f || fabs(odom_delt_pz) > 10.f || delt_t < 0.f || delt_t > 10.f){
+        std::cout << "Delta position: " << odom_delt_px << " " << odom_delt_py << " " << odom_delt_pz << std::endl;
+
+        if(fabs(odom_delt_px) > 100.f || fabs(odom_delt_py) > 100.f || fabs(odom_delt_pz) > 100.f || delt_t < 0.f || delt_t > 10.f){
             cout << "!!! delt_t = "<< delt_t <<endl;
             cout << "!!! sensor_px_last = " << sensor_px_last << "sensor_px = " << sensor_px << " odom_delt_px="<<odom_delt_px<<endl;
             cout << "!!! sensor_py_last = " << sensor_py_last << "sensor_py = " << sensor_py << " odom_delt_py="<<odom_delt_py<<endl;

@@ -31,23 +31,24 @@ Description: This is the head file for the DSP map with constant velocity model.
 #include <pcl/segmentation/extract_clusters.h>
 #include <thread>
 #include "munkres.h"
+#include <vector>
 
 using namespace std;
 
 /** Parameters for the map **/
-#define MAP_LENGTH_VOXEL_NUM 66
-#define MAP_WIDTH_VOXEL_NUM 66
-#define MAP_HEIGHT_VOXEL_NUM 40
-#define VOXEL_RESOLUTION 0.15
-#define ANGLE_RESOLUTION 3
-#define MAX_PARTICLE_NUM_VOXEL 9
+#define MAP_LENGTH_VOXEL_NUM 256
+#define MAP_WIDTH_VOXEL_NUM 256
+#define MAP_HEIGHT_VOXEL_NUM 120
+#define VOXEL_RESOLUTION 0.2
+#define ANGLE_RESOLUTION 2
+#define MAX_PARTICLE_NUM_VOXEL 8
 #define LIMIT_MOVEMENT_IN_XY_PLANE 1
 
-#define PREDICTION_TIMES 6
-static const float prediction_future_time[PREDICTION_TIMES] = {0.05f, 0.2f, 0.5f, 1.f, 1.5f, 2.f}; //unit: second. The first value is used to compensate the delay caused by the map.
+#define PREDICTION_TIMES 1
+static const float prediction_future_time[PREDICTION_TIMES] = {0.05f}; //unit: second. The first value is used to compensate the delay caused by the map.
 
-const int half_fov_h = 42;
-const int half_fov_v = 24;
+const int half_fov_h = 40;
+const int half_fov_v = 14;
 
 #define DYNAMIC_CLUSTER_MAX_POINT_NUM 200
 #define DYNAMIC_CLUSTER_MAX_CENTER_HEIGHT 1.5
@@ -113,15 +114,16 @@ struct ClusterFeature{
 /// Container for voxels h particles
 //  1.flag 2.vx 3.vy 4.vz 5.px 6.py 7.pz
 //  8.weight 9.update time
-static float voxels_with_particle[VOXEL_NUM][SAFE_PARTICLE_NUM_VOXEL][9];
+// float voxels_with_particle[VOXEL_NUM][SAFE_PARTICLE_NUM_VOXEL][9];
+std::vector<std::vector<std::vector<float>>> voxels_with_particle(VOXEL_NUM, std::vector<std::vector<float>>(SAFE_PARTICLE_NUM_VOXEL, std::vector<float>(9, 0.f)));
 
 // 1. objects number; 2-4. Avg vx, vy, vz; 5-. Future objects number
-static const int voxels_objects_number_dimension = 4 + PREDICTION_TIMES;
-static float voxels_objects_number[VOXEL_NUM][voxels_objects_number_dimension];
+const int voxels_objects_number_dimension = 4 + PREDICTION_TIMES;
+float voxels_objects_number[VOXEL_NUM][voxels_objects_number_dimension];
 
 /// Container for pyramids
 // 0.flag 1.particle voxel index  2.particle index inside voxel
-static int pyramids_in_fov[observation_pyramid_num][SAFE_PARTICLE_NUM_PYRAMID][3];
+int pyramids_in_fov[observation_pyramid_num][SAFE_PARTICLE_NUM_PYRAMID][3];
 
 // 1.neighbors num 2-10:neighbor indexes
 static int observation_pyramid_neighbors[observation_pyramid_num][10]{};
@@ -176,6 +178,10 @@ public:
 
     ~DSPMap(){
         cout << "\n See you ;)" <<endl;
+    }
+
+    void setKappa(float kappa_set){
+        kappa = kappa_set;
     }
 
     int update(int point_cloud_num, int size_of_one_point, float *point_cloud_ptr,

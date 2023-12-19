@@ -15,6 +15,7 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
 )
 
+find_package(yaml-cpp REQUIRED)
 
 add_definitions(${PCL_DEFINITIONS})
 
@@ -28,12 +29,14 @@ include_directories(
   ${PCL_INCLUDE_DIRS}
 )
 
+include_directories(${YAML_CPP_INCLUDE_DIR})
+
 include_directories(/usr/local/include/munkres)
 set(MunkresLIB
         /usr/local/lib/libmunkres.a
         )
 
 add_executable(map_sim_example src/map_sim_example.cpp)
-target_link_libraries(map_sim_example ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${MunkresLIB})
+target_link_libraries(map_sim_example ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${MunkresLIB} ${YAML_CPP_LIBRARIES})
 
 
