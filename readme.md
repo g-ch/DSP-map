@@ -11,6 +11,12 @@ Just include one of the head files in your source file and use the map. We write
 
 A ROS __node example__ `map_sim_example.cpp` can be found in the `src` folder. In the example, we subscribe point cloud from topic `/camera_front/depth/points` and pose from `/mavros/local_position/pose` to build the map. We publish the current occupancy status with topic `/my_map/cloud_ob` and one layer of the predicted future occupancy maps with topic `/my_map/future_status` in the point cloud form.
 
+
+# Progress
+__New Progress!__ 2024.9.22 We have released the code of [Semantic DSP Map](https://github.com/tud-amr/semantic_dsp_map), which is an upgraded version of the DSP map. Compared to DSP map, Semantic DSP map contains instance-aware semantic information and has less noise. Please check [here](https://github.com/tud-amr/semantic_dsp_map) for details.
+
+A UAV simulation tool (third party) made by RicardoLEE123 using the DSP map is [here](https://github.com/SmartGroupSystems/Dsp-map-simulator).
+
 # Compile
 __Tested environment__: Ubuntu 18.04 + ROS Melodic and Ubuntu 20.04 + ROS Noetic
 
